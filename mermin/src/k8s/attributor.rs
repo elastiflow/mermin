@@ -215,10 +215,8 @@ fn create_k8s_attributes_mapping(direction: &str) -> AttributesOptions {
 /// Holds metadata for a single Kubernetes object.
 #[derive(Debug, Clone)]
 pub struct K8sObjectMeta {
-    #[allow(dead_code)]
     pub kind: String,
     pub name: String,
-    #[allow(dead_code)]
     pub uid: Option<String>,
     pub namespace: Option<String>,
     #[allow(dead_code)]
@@ -271,8 +269,6 @@ pub enum DecorationInfo {
     },
     Service {
         service: K8sObjectMeta,
-        #[allow(dead_code)]
-        backend_ips: Vec<String>,
     },
     EndpointSlice {
         slice: K8sObjectMeta,
@@ -430,10 +426,6 @@ impl ResourceStore {
             }
         }
 
-        debug!(
-            event.name = "k8s.ip_index.initial_build",
-            "caches synced, performing initial ip index build"
-        );
         update_ip_index(&store, &ip_index, conf).await;
 
         let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(256);
@@ -459,10 +451,6 @@ impl ResourceStore {
                             update_ip_index(&store_clone, &ip_index_clone, &conf_clone).await;
                             timer.observe_duration();
                             pending_update = false;
-                            trace!(
-                                event.name = "k8s.ip_index.updated",
-                                "IP index rebuilt due to K8s resource changes"
-                            );
                         }
                     }
                 }
@@ -637,7 +625,6 @@ pub struct FlowContext {
 
 impl FlowContext {
     pub async fn from_flow_span(flow_span: &FlowSpan, attributor: &Attributor) -> Self {
-        // Extract IPs and ports
         let (src_ip, dst_ip, port, protocol) = (
             flow_span.attributes.source_address,
             flow_span.attributes.destination_address,
@@ -645,7 +632,6 @@ impl FlowContext {
             flow_span.attributes.network_transport,
         );
 
-        // Resolve pods
         let src_pod = attributor.get_pod_by_ip(src_ip).await;
         let dst_pod = attributor.get_pod_by_ip(dst_ip).await;
 
@@ -662,8 +648,6 @@ impl FlowContext {
 
 /// A high-level client for querying Kubernetes resources.
 pub struct Attributor {
-    #[allow(dead_code)]
-    pub client: Client,
     pub resource_store: ResourceStore,
     pub owner_relations_manager: OwnerRelationsManager,
     pub selector_relations_manager: Option<SelectorRelationsManager>,
@@ -672,7 +656,6 @@ pub struct Attributor {
 }
 
 impl Attributor {
-    /// Creates a new Decorator, initializing all resource reflectors concurrently.
     pub async fn new(
         health_state: HealthState,
         owner_relations_opts: Option<OwnerRelationsRules>,
@@ -738,20 +721,15 @@ impl Attributor {
         )
         .await?;
 
-        // Use provided config or defaults
         let owner_relations_manager =
             OwnerRelationsManager::new(owner_relations_opts.unwrap_or_default());
 
-        // Create selector relations manager if rules are provided
-        // Note: If selector_relations is None or an empty list, no manager is created.
-        // This is intentional - without rules, selector matching cannot function.
-        // Both states effectively mean "selector relations disabled".
+        // If selector_relations is None or empty, no manager is created — selector matching is disabled.
         let selector_relations_manager = selector_relations_opts
             .filter(|rules| !rules.is_empty())
             .map(SelectorRelationsManager::new);
 
         Ok(Self {
-            client,
             resource_store,
             owner_relations_manager,
             selector_relations_manager,
@@ -854,28 +832,7 @@ impl Attributor {
             }
         }
 
-        // Apply conflict resolution logic
-        let resolved_resources =
-            self.resolve_ip_conflicts(ip, &pods, &nodes, &services, &other_resources);
-
-        // Log the final resolved resources after conflict resolution
-        for res in &resolved_resources {
-            let is_host_nw = is_host_network_resource(res.as_ref());
-            let kind = K::kind(&());
-
-            trace!(
-                event.name = "k8s.attributor.resolved",
-                k8s.resource.kind = %kind,
-                k8s.resource.name = %res.name_any(),
-                k8s.resource.namespace = %res.namespace().unwrap_or_default(),
-                k8s.resource.uid = %res.meta().uid.as_deref().unwrap_or_default(),
-                k8s.resource.ip = %ip,
-                k8s.resource.host_network = %is_host_nw,
-                "resource attributed to ip address"
-            );
-        }
-
-        resolved_resources
+        self.resolve_ip_conflicts(ip, &pods, &nodes, &services, &other_resources)
     }
 
     /// Looks up a Pod by its IP address.
@@ -898,35 +855,6 @@ impl Attributor {
         self.get_objects_by_ip(ip).await.into_iter().next()
     }
 
-    /// Takes a virtual IP (like a ClusterIP) and resolves it to the list of
-    /// real, ready backend IP addresses from the associated EndpointSlices.
-    ///
-    /// Returns `None` if the input IP does not belong to any Service.
-    /// Returns `Some(Vec<String>)` containing the backend IPs if resolution is successful.
-    pub async fn resolve_service_ip_to_backend_ips(
-        &self,
-        service_ip: IpAddr,
-    ) -> Option<Vec<String>> {
-        let service = self.get_service_by_ip(service_ip).await?;
-        let slices = self.get_endpointslices_for_service(&service);
-
-        let backend_ips = slices
-            .iter()
-            .flat_map(|slice| &slice.endpoints)
-            .filter(|endpoint| {
-                endpoint
-                    .conditions
-                    .as_ref()
-                    .and_then(|c| c.ready)
-                    .unwrap_or(false)
-            })
-            .flat_map(|endpoint| &endpoint.addresses)
-            .cloned()
-            .collect::<Vec<String>>();
-
-        Some(backend_ips)
-    }
-
     /// Looks up an EndpointSlice directly by one of its endpoint IP addresses.
     pub async fn get_endpointslice_by_ip(&self, ip: IpAddr) -> Option<Arc<EndpointSlice>> {
         self.get_objects_by_ip(ip).await.into_iter().next()
@@ -939,7 +867,7 @@ impl Attributor {
     /// # Arguments
     /// * `ip` - The IP address being resolved
     /// * `pods` - Pod resources found for this IP
-    /// * `nodes` - Node resources found for this IP  
+    /// * `nodes` - Node resources found for this IP
     /// * `services` - Service resources found for this IP
     /// * `other_resources` - Other resource types found for this IP
     ///
@@ -969,12 +897,6 @@ impl Attributor {
                 .collect();
 
             if !host_nw_pods.is_empty() {
-                trace!(
-                    event.name = "k8s.attributor.conflict_resolved",
-                    net.ip.address = %ip,
-                    resolution = "host_network_pod_on_node_ip",
-                    "resolved ip conflict: allowing host network pod on node ip"
-                );
                 return if is_k_pod {
                     self.downcast_arc_vec(&host_nw_pods)
                 } else {
@@ -982,28 +904,11 @@ impl Attributor {
                 };
             }
             if !nodes.is_empty() {
-                if !pods.is_empty() {
-                    trace!(
-                        event.name = "k8s.attributor.conflict_resolved",
-                        net.ip.address = %ip,
-                        resolution = "node_over_regular_pod_on_node_ip",
-                        "resolved ip conflict: preferring node over regular pod on node ip"
-                    );
-                }
                 return if is_k_node {
                     self.downcast_arc_vec(nodes)
                 } else {
                     Vec::new()
                 };
-            }
-
-            if !pods.is_empty() {
-                trace!(
-                    event.name = "k8s.attributor.conflict_resolved",
-                    net.ip.address = %ip,
-                    resolution = "reject_regular_pod_on_node_ip",
-                    "resolved ip conflict: rejecting regular pod claiming node ip"
-                );
             }
             return Vec::new();
         }
@@ -1055,32 +960,6 @@ impl Attributor {
         })
     }
 
-    /// Finds all EndpointSlices associated with a given Service.
-    pub fn get_endpointslices_for_service(&self, service: &Service) -> Vec<Arc<EndpointSlice>> {
-        let service_name = service.metadata.name.as_deref().unwrap_or_default();
-        if service_name.is_empty() {
-            return Vec::new();
-        }
-
-        self.resource_store
-            .endpoint_slices
-            .state()
-            .iter()
-            .filter(|slice| {
-                // Ensure the slice is in the same namespace as the service
-                slice.metadata.namespace == service.metadata.namespace &&
-                    // Check for the controlling label
-                    slice
-                        .metadata
-                        .labels
-                        .as_ref()
-                        .and_then(|labels| labels.get("kubernetes.io/service-name"))
-                        .is_some_and(|name| name == service_name)
-            })
-            .cloned()
-            .collect()
-    }
-
     /// Main entry point: finds all NetworkPolicies that permit the specified traffic flow
     pub fn get_matching_network_policies(
         &self,
@@ -1098,7 +977,7 @@ impl Attributor {
 
     /// Gets NetworkPolicies that apply to the given pod based on podSelector
     fn get_network_policies_for_pod(&self, pod: &Pod) -> Result<Vec<Arc<NetworkPolicy>>, K8sError> {
-        let pod_namespace = pod.clone().metadata.namespace.unwrap_or_default();
+        let pod_namespace = pod.metadata.namespace.clone().unwrap_or_default();
         let pod_labels = pod.labels();
 
         let policies = self
@@ -1106,11 +985,10 @@ impl Attributor {
             .get_by_namespace::<NetworkPolicy>(&pod_namespace)
             .into_iter()
             .filter(|policy| {
-                // Check if the policy's podSelector matches the destination pod
                 policy
                     .spec
                     .as_ref()
-                    .map(|spec| spec.clone().pod_selector)
+                    .map(|spec| spec.pod_selector.clone())
                     .is_some_and(|selector| self.selector_matches(&selector, pod_labels))
             })
             .collect();
@@ -1118,13 +996,11 @@ impl Attributor {
         Ok(policies)
     }
 
-    /// Checks if a label selector matches the given labels
     fn selector_matches(
         &self,
         selector: &LabelSelector,
         labels: &BTreeMap<String, String>,
     ) -> bool {
-        // Check match_labels
         if let Some(match_labels) = &selector.match_labels {
             for (key, value) in match_labels {
                 if labels.get(key) != Some(value) {
@@ -1133,7 +1009,6 @@ impl Attributor {
             }
         }
 
-        // Check match_expressions
         if let Some(match_expressions) = &selector.match_expressions {
             for expr in match_expressions {
                 if !self.expression_matches(expr, labels) {
@@ -1145,7 +1020,6 @@ impl Attributor {
         true
     }
 
-    /// Checks if a label selector requirement matches the given labels
     fn expression_matches(
         &self,
         expr: &LabelSelectorRequirement,
@@ -1248,14 +1122,12 @@ impl Attributor {
         })
     }
 
-    /// Enhanced port matching with support for ranges and named ports for a single port spec.
     fn port_matches(
         &self,
         ctx: &FlowContext,
         port_spec: &NetworkPolicyPort,
         direction: FlowDirection,
     ) -> bool {
-        // First, ensure the protocol matches. This is a good guard clause.
         let proto_match = port_spec
             .protocol
             .as_deref()
@@ -1266,7 +1138,6 @@ impl Attributor {
             return false;
         }
 
-        // Then, check the port number based on its type (Int, String, or None)
         match &port_spec.port {
             Some(IntOrString::Int(p_num)) => {
                 let start_port = *p_num as u16;
@@ -1276,18 +1147,17 @@ impl Attributor {
             Some(IntOrString::String(port_name)) => {
                 self.resolve_named_port(ctx, port_name, direction)
             }
-            None => true, // If `port` is not specified, it allows all ports for the given protocol.
+            // No port specified means all ports for the given protocol are allowed.
+            None => true,
         }
     }
 
-    /// Resolves named ports by searching through the containers of the relevant pod.
     fn resolve_named_port(
         &self,
         ctx: &FlowContext,
         port_name: &str,
         direction: FlowDirection,
     ) -> bool {
-        // Determine which pod to inspect based on traffic direction.
         let target_pod = match direction {
             FlowDirection::Ingress => &ctx.dst_pod,
             FlowDirection::Egress => &ctx.src_pod,
@@ -1321,19 +1191,16 @@ impl Attributor {
             (ctx.dst_ip, &ctx.dst_pod)
         };
 
-        // If the peer has an ipBlock, a match on CIDR is sufficient.
         if let Some(ip_block) = &peer.ip_block
             && self.ip_matches_cidr(target_ip, &ip_block.cidr)
         {
             return true;
         }
 
-        // If we didn't match an ipBlock and there's no pod, we can't match further.
         let Some(pod) = target_pod else {
             return false;
         };
 
-        // Check for namespace selector match.
         let namespace_matches =
             self.namespace_matches_selector_internal(pod, peer, policy_namespace);
 
@@ -1341,16 +1208,13 @@ impl Attributor {
             return false;
         }
 
-        // If namespace matches, check for pod selector match.
-        // No pod selector means it matches all pods in the selected namespace(s).
+        // No pod selector means all pods in the matched namespace(s) are allowed.
         peer.pod_selector
             .as_ref()
             .is_none_or(|ps| self.selector_matches(ps, pod.labels()))
     }
 
-    /// Checks if an IP address matches a CIDR block using the `ipnetwork` crate.
     fn ip_matches_cidr(&self, ip: IpAddr, cidr: &str) -> bool {
-        // The `ipnetwork` crate handles parsing both single IPs and CIDR notations correctly.
         match cidr.parse::<IpNetwork>() {
             Ok(network) => network.contains(ip),
             Err(_) => {
@@ -1364,7 +1228,6 @@ impl Attributor {
         }
     }
 
-    /// Consolidated namespace matching for both ingress and egress rules
     fn namespace_matches_selector_internal(
         &self,
         pod: &Pod,
@@ -1373,7 +1236,6 @@ impl Attributor {
     ) -> bool {
         match &peer.namespace_selector {
             Some(ns_selector) => {
-                // If namespace selector is present, evaluate it against the pod's namespace
                 let pod_namespace = pod.namespace().unwrap_or_default();
                 if let Some(ns) = self
                     .resource_store
@@ -1420,7 +1282,6 @@ fn extract_values_from_resource<K: serde::Serialize>(
     Ok(results)
 }
 
-/// (private helper) Resolves a hostname and adds all resulting IPs to the index.
 async fn index_hostname(
     new_index: &mut HashMap<String, Vec<K8sObjectMeta>>,
     hostname: &str,
@@ -1436,10 +1297,8 @@ async fn index_hostname(
     }
 }
 
-/// (private helper) Adds an IP address and metadata to the index.
 fn add_to_index(index: &mut HashMap<String, Vec<K8sObjectMeta>>, ip: &str, meta: &K8sObjectMeta) {
     let entries = index.entry(ip.to_string()).or_default();
-    // Only add if this specific resource (by UID) is not already indexed for this IP
     if !entries.iter().any(|existing| existing.uid == meta.uid) {
         entries.push(meta.clone());
     }
@@ -1486,7 +1345,7 @@ async fn index_resource_by_ip<K>(
             let meta = K8sObjectMeta::from(resource.as_ref());
 
             for path in &source.to {
-                // Skip hostIP/hostIPs paths if it's a regular pod
+                // Skip node IP paths for regular (non-host-network) pods
                 if is_pod
                     && !is_host_network
                     && (path.contains("hostIP") || path.contains("hostIPs"))
@@ -1677,12 +1536,6 @@ fn spawn_ip_resource_watcher<K, F>(
         let k8s_shrink_policy = ShrinkPolicy::k8s_cache();
 
         loop {
-            debug!(
-                event.name = "k8s.watcher.starting",
-                k8s.resource.name = %resource_name,
-                "Starting K8s resource watcher for IP index updates"
-            );
-
             let watcher_config = watcher::Config::default();
             let mut stream = watcher(api.clone(), watcher_config).boxed();
 
@@ -1696,39 +1549,20 @@ fn spawn_ip_resource_watcher<K, F>(
                             ])
                             .inc();
 
-                        let host_network = is_host_network_resource(&obj);
-
-                        // Extract current IPs from this resource
                         let current_ips = extract_ips(&obj);
                         let uid = obj.meta().uid.clone().unwrap_or_default();
 
-                        // Compare with cached IPs to detect if IPs actually changed
                         let ips_changed = if let Some(cached_ips) = ip_cache.get(&uid) {
                             cached_ips != &current_ips
                         } else {
-                            // New resource, IPs definitely changed (from none to some)
                             !current_ips.is_empty()
                         };
 
                         if ips_changed {
-                            // Update cache with new IPs
                             ip_cache.insert(uid.clone(), current_ips.clone());
 
-                            debug!(
-                                event.name = "k8s.watcher.add_uid",
-                                k8s.resource.kind = %resource_name,
-                                k8s.resource.object = ?obj.meta().name,
-                                k8s.resource.name = %obj.name_any(),
-                                k8s.resource.namespace = %obj.namespace().unwrap_or_default(),
-                                k8s.resource.uid = %uid,
-                                k8s.resource.ips = %current_ips.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(","),
-                                k8s.resource.host_network = %host_network,
-                                "resource ips changed, adding uid to ip cache"
-                            );
-
-                            // Trigger IP index rebuild. try_send is intentional: if the channel
-                            // is full, a signal is already pending (debounce handles it). If
-                            // closed, the consumer is gone and we stop the watcher.
+                            // try_send is intentional: if full, a rebuild is already pending.
+                            // If closed, the consumer is gone and we should stop.
                             match event_tx.try_send(()) {
                                 Ok(()) | Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {}
                                 Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
@@ -1740,21 +1574,6 @@ fn spawn_ip_resource_watcher<K, F>(
                                     return;
                                 }
                             }
-                            trace!(
-                                event.name = "k8s.watcher.ip_changed",
-                                k8s.resource.name = %resource_name,
-                                k8s.resource.object = ?obj.meta().name,
-                                k8s.resource.uid = %uid,
-                                old_ip_count = current_ips.len(),
-                                "Resource IPs changed, triggering IP index update"
-                            );
-                        } else {
-                            trace!(
-                                event.name = "k8s.watcher.ip_unchanged",
-                                k8s.resource.name = %resource_name,
-                                k8s.resource.object = ?obj.meta().name,
-                                "Resource updated but IPs unchanged, skipping rebuild"
-                            );
                         }
                     }
                     Ok(watcher::Event::Delete(obj)) => {
@@ -1765,18 +1584,15 @@ fn spawn_ip_resource_watcher<K, F>(
                             ])
                             .inc();
 
-                        // Remove from cache and trigger rebuild since IPs are being removed
                         let uid = obj.meta().uid.clone().unwrap_or_default();
                         ip_cache.remove(&uid);
 
-                        // Schedule cleanup of metrics for this resource
                         if let Some(ref tracker) = cleanup_tracker {
                             tracker.schedule_k8s_cleanup(resource_name.clone());
                         }
 
-                        // Shrink ip_cache capacity if it's significantly oversized.
-                        // This prevents capacity retention when many K8s resources are deleted
-                        // (e.g., during scale-down, pod churn, or cluster drain).
+                        // Shrink capacity after deletions to avoid retaining excess memory
+                        // during scale-down, pod churn, or cluster drain.
                         let cache_capacity = ip_cache.capacity();
                         let cache_len = ip_cache.len();
                         if k8s_shrink_policy.should_shrink(cache_capacity, cache_len) {
@@ -1794,14 +1610,6 @@ fn spawn_ip_resource_watcher<K, F>(
                                 return;
                             }
                         }
-                        trace!(
-                            event.name = "k8s.watcher.event",
-                            k8s.resource.name = %resource_name,
-                            k8s.resource.object = ?obj.meta().name,
-                            k8s.resource.uid = %uid,
-                            event_type = "delete",
-                            "Resource deleted, triggering IP index update"
-                        );
                     }
                     Ok(watcher::Event::Init) => {
                         metrics::registry::K8S_WATCHER_EVENTS_TOTAL
@@ -1817,13 +1625,7 @@ fn spawn_ip_resource_watcher<K, F>(
                             "K8s watcher initialization started"
                         );
                     }
-                    Ok(watcher::Event::InitApply(_)) => {
-                        trace!(
-                            event.name = "k8s.watcher.init_apply",
-                            k8s.resource.name = %resource_name,
-                            "K8s watcher loading initial object"
-                        );
-                    }
+                    Ok(watcher::Event::InitApply(_)) => {}
                     Ok(watcher::Event::InitDone) => {
                         metrics::registry::K8S_WATCHER_EVENTS_TOTAL
                             .with_label_values(&[
@@ -1879,16 +1681,10 @@ async fn update_ip_index(
     index: &Arc<ArcSwap<HashMap<String, Vec<K8sObjectMeta>>>>,
     conf: &Conf,
 ) {
-    debug!(
-        event.name = "k8s.ip_index.update_start",
-        "starting ip index update"
-    );
-
     let mut new_index = HashMap::new();
 
     if let Some(attributes_map) = &conf.attributes {
         for direction_map in attributes_map.values() {
-            // Iterate through every provider (k8s, etc.)
             if let Some(k8s_conf) = direction_map.get("k8s") {
                 let assoc = &k8s_conf.association;
 
