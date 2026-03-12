@@ -951,6 +951,7 @@ async fn start_pipeline(
         Arc::clone(&listening_ports_map),
         conf,
     )?;
+
     let flow_span_components = flow_span_producer.components();
 
     let owner_relations_opts = conf

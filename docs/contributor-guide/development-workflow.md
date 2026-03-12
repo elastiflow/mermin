@@ -453,15 +453,24 @@ mermin:
 
 ### Cleanup
 
-To remove Mermin from your cluster, uninstall the Helm chart. To tear down the entire cluster, use `kind delete`.
+Uninstall individual components as needed, then delete the kind cluster to tear everything down.
 
 ```shell
-# Uninstall the mermin Helm release
-helm uninstall mermin
+# Uninstall the Mermin Helm release
+helm uninstall mermin -n default
 
-# Delete the kind cluster
-kind delete cluster -n atlantis
+# Uninstall Prometheus/Grafana stack (if installed)
+helm uninstall prometheus -n prometheus
+kubectl delete namespace prometheus
+
+# Remove the metrics-server (if installed)
+kubectl delete -f https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.8.0/components.yaml
+
+# Delete the kind cluster (removes all remaining resources)
+kind delete cluster --name atlantis
 ```
+
+> **Note**: Deleting the kind cluster is sufficient to remove all workloads and namespaces at once. The individual uninstall steps above are only necessary if you want to remove a specific component while keeping the cluster running.
 
 ## Cross-Compiling
 

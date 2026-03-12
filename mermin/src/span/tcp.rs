@@ -26,7 +26,6 @@ pub enum TcpFlag {
 }
 
 impl TcpFlag {
-    /// Convert the TCP flag to its string representation
     pub const fn as_str(&self) -> &'static str {
         match self {
             TcpFlag::Fin => "fin",
@@ -47,20 +46,19 @@ impl std::fmt::Display for TcpFlag {
     }
 }
 
-/// Represents TCP flags as an array of 8 boolean values
-/// Order: [FIN, SYN, RST, PSH, ACK, URG, ECE, CWR]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TcpFlags {
     flags: [bool; 8],
 }
 
 impl TcpFlags {
-    /// Convert bit flags (u8) to a vector of active TcpFlag enum variants
+    /// Convert a bit-flag byte to a vector of active [`TcpFlag`] variants.
+    /// Order: [FIN, SYN, RST, PSH, ACK, URG, ECE, CWR]
     pub fn flags_from_bits(bits: u8) -> Vec<TcpFlag> {
         Self::active_flags_from_array(&Self::bits_to_array(bits))
     }
 
-    /// Calculate latency between SYN and SYN+ACK packets
+    /// Latency between SYN and SYN+ACK timestamps (nanoseconds).
     pub fn handshake_latency_from_stats(syn_ns: u64, syn_ack_ns: u64) -> i64 {
         if syn_ns == 0 || syn_ack_ns == 0 || syn_ack_ns <= syn_ns {
             return 0;
@@ -69,7 +67,7 @@ impl TcpFlags {
         syn_ack_ns.saturating_sub(syn_ns) as i64
     }
 
-    /// Calculate latency from duration sum (ns) and transaction counts
+    /// Average transaction latency from sum and count (nanoseconds).
     pub fn transaction_latency_from_stats(sum: u64, count: u32) -> i64 {
         if count == 0 {
             return 0;
@@ -77,7 +75,6 @@ impl TcpFlags {
         (sum / count as u64) as i64
     }
 
-    /// Convert u8 bit flags to a boolean array
     fn bits_to_array(bits: u8) -> [bool; 8] {
         [
             (bits & TCP_FLAG_FIN) != 0, // FIN
@@ -91,7 +88,6 @@ impl TcpFlags {
         ]
     }
 
-    /// Convert a boolean array to a vector of active TcpFlag enum variants
     fn active_flags_from_array(flags: &[bool; 8]) -> Vec<TcpFlag> {
         const FLAG_ENUMS: [TcpFlag; 8] = [
             TcpFlag::Fin,

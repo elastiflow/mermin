@@ -3,13 +3,12 @@
 **Block:** `span`
 
 Mermin groups captured packets into bidirectional flows and exports each flow as an OpenTelemetry span. The `span` block controls when flows are closed and when they emit records,
-plus Community ID hashing, trace ID correlation, and hostname resolution. Add a top-level `span { }` block in your [configuration file](../overview.md); there are no CLI or environment overrides for span options.
+plus Community ID hashing and trace ID correlation. Add a top-level `span { }` block in your [configuration file](../overview.md); there are no CLI or environment overrides for span options.
 
 The span block lets you configure:
 
 - **Timeouts and record interval**: when flows are closed (protocol-specific inactivity timeouts) and how often long-lived flows emit records (`max_record_interval`)
 - **Community ID and trace correlation**: five-tuple hashing for correlation across agents and how long the same Community ID keeps the same trace ID
-- **Hostname resolution**: whether to resolve IPs to hostnames for `client.address` and `server.address` and the lookup timeout
 
 Flow semantics (how flows become OpenTelemetry spans and what attributes they carry) are in [Semantic Conventions](../../concepts/semantic-conventions.md) and [Attribute Reference](../../getting-started/attribute-reference.md).
 
@@ -161,38 +160,6 @@ A full configuration example can be found in the [Default Configuration](../defa
   ```hcl
   span {
     trace_id_timeout = "1h"
-  }
-  ```
-
-- `enable_hostname_resolution` attribute
-
-  When true, `client.address` and `server.address` may be reverse-DNS hostnames instead of IPs ([Attribute Reference](../../getting-started/attribute-reference.md)).
-
-  **Type:** Boolean
-
-  **Default:** `true`
-
-  **Example:** Disable hostname resolution to avoid DNS lookups and use IPs only
-
-  ```hcl
-  span {
-    enable_hostname_resolution = false
-  }
-  ```
-
-- `hostname_resolve_timeout` attribute
-
-  Timeout for each reverse-DNS lookup. Results are cached.
-
-  **Type:** Duration
-
-  **Default:** `100ms`
-
-  **Example:** Increase timeout for slow or high-latency DNS
-
-  ```hcl
-  span {
-    hostname_resolve_timeout = "500ms"
   }
   ```
 

@@ -66,6 +66,7 @@ Span #1
         Status       : Unset
         Attributes:
                  ->  flow.community_id: String(Owned("1:a962MiVftHsve9ogcQKeY0/p9bc="))
+                 ->  flow.direction: String(Static("reverse"))
                  ->  network.type: String(Static("ipv4"))
                  ->  network.transport: String(Static("icmp"))
                  ->  source.address: String(Owned("8.8.8.8"))
@@ -100,10 +101,6 @@ Span #1
                  ->  flow.reverse.icmp.type.name: String(Owned("echo_reply"))
                  ->  flow.reverse.icmp.code.id: I64(0)
                  ->  flow.reverse.icmp.code.name: String(Owned(""))
-                 ->  client.address: String(Owned("10.244.2.4"))
-                 ->  client.port: I64(0)
-                 ->  server.address: String(Owned("dns.google"))
-                 ->  server.port: I64(0)
                  ->  destination.k8s.namespace.name: String(Owned("default"))
                  ->  destination.k8s.pod.name: String(Owned("test-pod"))
 ```
