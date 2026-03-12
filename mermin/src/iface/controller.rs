@@ -258,7 +258,7 @@ impl IfaceController {
 
         Ok(Self {
             patterns,
-            active_ifaces: HashSet::new(), // Will be populated by initialize() after namespace switch
+            active_ifaces: HashSet::new(),
             tc_links: HashMap::new(),
             iface_map,
             ebpf,
@@ -307,7 +307,7 @@ impl IfaceController {
                 .set(1);
         }
 
-        self.build_iface_map()?;
+        self.build_iface_map();
 
         // Clean up any orphaned TC programs from previous instances before attaching new ones.
         // This prevents the issue where killed pods leave TC programs attached that intercept traffic.
@@ -455,24 +455,16 @@ impl IfaceController {
         Ok(())
     }
 
-    /// Consume the controller and return the `Ebpf` object.
-    ///
-    /// Called after [`shutdown()`] to recover the `Ebpf` object for reuse across
-    /// pipeline restarts.  Dropping the controller first ensures all other fields
-    /// (tc_links, active_ifaces, …) are cleaned up before the `Ebpf` is handed off.
     pub fn into_ebpf(self) -> Ebpf {
         self.ebpf
     }
 
-    /// Get shared iface_map for flow decoration. ArcSwap allows lock-free reads
-    /// while controller updates it dynamically.
     #[must_use]
     pub fn iface_map(&self) -> Arc<ArcSwap<HashMap<u32, String>>> {
         Arc::clone(&self.iface_map)
     }
 
-    /// Build interface index → name mapping from host namespace.
-    fn build_iface_map(&mut self) -> Result<(), MerminError> {
+    fn build_iface_map(&mut self) {
         let mut new_map = HashMap::with_capacity(self.active_ifaces.len());
         for iface in datalink::interfaces() {
             if self.active_ifaces.contains(&iface.name) {
@@ -480,11 +472,8 @@ impl IfaceController {
             }
         }
         self.iface_map.store(Arc::new(new_map));
-
-        Ok(())
     }
 
-    /// Add newly discovered interface to iface_map.
     fn iface_map_add(&mut self, iface_name: &str) -> Result<(), MerminError> {
         for iface in datalink::interfaces() {
             if iface.name == iface_name {
@@ -505,7 +494,6 @@ impl IfaceController {
         )))
     }
 
-    /// Remove interface from iface_map.
     fn iface_map_remove(&mut self, iface_name: &str) {
         let mut new_map = (**self.iface_map.load()).clone();
         new_map.retain(|idx, name| {
@@ -782,7 +770,7 @@ impl IfaceController {
     ) -> Result<SchedClassifierLinkId, MerminError> {
         let options = TcAttachOptions::Netlink(NlOptions {
             priority,
-            handle: 0, // Let system choose handle
+            handle: 0,
         });
 
         program
@@ -814,7 +802,6 @@ impl IfaceController {
 
         let iface_owned = iface.to_string();
 
-        // In TCX mode, try to unpin the link before detaching
         if self.use_tcx {
             let pin_path = Self::pin_path(&iface_owned, direction);
             match PinnedLink::from_pin(&pin_path) {
@@ -1046,7 +1033,7 @@ impl IfaceController {
         Ok(())
     }
 
-    /// Remove orphaned TC programs from an interface.
+    /// Remove orphaned TC programs from an interface using netlink.
     ///
     /// Uses Aya's native netlink functions to find and detach TC programs by name.
     /// Returns the count of removed programs.

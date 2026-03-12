@@ -100,11 +100,6 @@ pub fn spawn_controller_thread(
                      requires hostPID: true and CAP_SYS_ADMIN capability.",
                 );
             }
-            info!(
-                event.name = "interface_controller.started",
-                "controller thread started and permanently in host network namespace"
-            );
-
             if let Some(ref tx) = event_tx && tx.send(ControllerEvent::Ready).is_err() {
                 error!(
                     event.name = "interface_controller.ready_send_failed",
@@ -284,7 +279,6 @@ pub fn spawn_netlink_thread(
                 "netlink monitoring thread started and permanently in host network namespace"
             );
 
-            // Create netlink socket using raw libc (netlink-sys Socket has buffering issues)
             // SAFETY: socket() syscall is safe to call. We check the return value for errors.
             let sock_fd = unsafe { socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE as i32) };
             if sock_fd < 0 {
@@ -299,18 +293,11 @@ pub fn spawn_netlink_thread(
 
             let sock = NetlinkSocket(sock_fd);
 
-            info!(
-                event.name = "interface_controller.netlink.socket_created",
-                socket_fd = sock.as_raw_fd(),
-                "netlink socket created successfully"
-            );
-
-            // Bind with kernel-assigned PID and no groups (will subscribe via setsockopt)
             // SAFETY: sockaddr_nl is a C-compatible struct that is safe to zero-initialize.
             let mut addr: sockaddr_nl = unsafe { mem::zeroed() };
             addr.nl_family = AF_NETLINK as u16;
-            addr.nl_pid = 0; // Kernel assigns PID
-            addr.nl_groups = 0; // No groups in bind, use setsockopt instead
+            addr.nl_pid = 0;
+            addr.nl_groups = 0;
 
             // SAFETY: sock is a valid socket descriptor, addr is properly initialized,
             // and we're passing the correct size. Return value is checked for errors.
@@ -494,30 +481,18 @@ pub fn spawn_netlink_thread(
                                                     let is_up =
                                                         link_msg.header.flags.contains(LinkFlags::Up);
 
-                                                    if is_up {
-                                                        debug!(
-                                                            event.name = "interface_controller.netlink.interface_up",
-                                                            network.interface.name = %if_name,
-                                                            "interface came up, sending event to controller"
-                                                        );
-                                                        if event_tx
+                                                    if is_up
+                                                        && event_tx
                                                             .send(NetlinkEvent::InterfaceUp {
                                                                 name: if_name,
                                                             })
                                                             .is_err()
-                                                        {
-                                                            error!(
-                                                                event.name = "interface_controller.netlink.channel_send_failed",
-                                                                "controller channel closed, exiting"
-                                                            );
-                                                            return;
-                                                        }
-                                                    } else {
-                                                        debug!(
-                                                            event.name = "interface_controller.netlink.interface_down_newlink",
-                                                            network.interface.name = %if_name,
-                                                            "interface reported without UP flag"
+                                                    {
+                                                        error!(
+                                                            event.name = "interface_controller.netlink.channel_send_failed",
+                                                            "controller channel closed, exiting"
                                                         );
+                                                        return;
                                                     }
                                                 }
                                             }
@@ -531,24 +506,17 @@ pub fn spawn_netlink_thread(
                                                             _ => None,
                                                         }
                                                     })
+                                                && event_tx
+                                                    .send(NetlinkEvent::InterfaceDown {
+                                                        name: if_name,
+                                                    })
+                                                    .is_err()
                                                 {
-                                                    debug!(
-                                                        event.name = "interface_controller.netlink.interface_down",
-                                                        network.interface.name = %if_name,
-                                                        "interface went down, sending event to controller"
+                                                    error!(
+                                                        event.name = "interface_controller.netlink.channel_send_failed",
+                                                        "controller channel closed, exiting"
                                                     );
-                                                    if event_tx
-                                                        .send(NetlinkEvent::InterfaceDown {
-                                                            name: if_name,
-                                                        })
-                                                        .is_err()
-                                                    {
-                                                        error!(
-                                                            event.name = "interface_controller.netlink.channel_send_failed",
-                                                            "controller channel closed, exiting"
-                                                        );
-                                                        return;
-                                                    }
+                                                    return;
                                                 }
                                             }
                                             _ => {}
@@ -567,7 +535,7 @@ pub fn spawn_netlink_thread(
                             }
                         }
                         Err(_) => {
-                            break;
+                        break;
                         }
                     }
                 }
