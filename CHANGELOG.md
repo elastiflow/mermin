@@ -1,3 +1,13 @@
+## [v0.3.3] - 2026-03-12
+
+### Bug Fixes
+
+- Cleanup and force a release (#517)
+
+[v0.3.2..v0.3.3](https://github.com/elastiflow/mermin/compare/v0.3.2...v0.3.3)
+
+
+
 ## [v0.3.2] - 2026-03-12
 
 ### Bug Fixes

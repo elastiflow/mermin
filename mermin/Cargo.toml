@@ -1,6 +1,6 @@
 [package]
 name = "mermin"
-version = "0.3.2"
+version = "0.3.3"
 edition = "2024"
 description = "An eBPF-based observability tool to monitor network traffic and system calls."
 
