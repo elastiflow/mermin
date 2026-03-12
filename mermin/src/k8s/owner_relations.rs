@@ -1,8 +1,3 @@
-// owner_relations.rs - Owner reference walking and filtering
-//
-// This module provides functionality for walking Kubernetes owner references
-// and filtering which owner kinds appear in flow metadata based on configuration.
-
 use std::collections::HashSet;
 
 use k8s_openapi::{
@@ -15,7 +10,7 @@ use k8s_openapi::{
 };
 use kube::{Resource, ResourceExt};
 use serde::{Deserialize, Serialize};
-use tracing::{trace, warn};
+use tracing::{debug, warn};
 
 use crate::k8s::attributor::{K8sObjectMeta, ResourceStore, WorkloadOwner};
 
@@ -57,26 +52,7 @@ pub struct OwnerRelationsManager {
 const MAX_OWNERS: usize = 32;
 
 impl OwnerRelationsManager {
-    /// Creates a new OwnerRelationsManager from configuration
-    ///
     /// All kind names are normalized to lowercase for case-insensitive matching.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use mermin::k8s::owner_relations::{OwnerRelationsManager, OwnerRelationsOptions};
-    ///
-    /// // Create a manager that only includes Deployment owners, up to 3 levels deep
-    /// let config = OwnerRelationsOptions {
-    ///     max_depth: 3,
-    ///     include_kinds: vec!["Deployment".to_string()],
-    ///     exclude_kinds: vec![],
-    /// };
-    /// let manager = OwnerRelationsManager::new(config);
-    ///
-    /// // Use with defaults
-    /// let manager = OwnerRelationsManager::new(OwnerRelationsOptions::default());
-    /// ```
     pub fn new(config: OwnerRelationsRules) -> Self {
         let include_kinds = config
             .include_kinds
@@ -104,42 +80,13 @@ impl OwnerRelationsManager {
     /// flow metadata. Returns None if no owners are found or all are filtered out.
     #[must_use]
     pub fn get_owners(&self, pod: &Pod, store: &ResourceStore) -> Option<Vec<WorkloadOwner>> {
-        let pod_name = pod.name_any();
-        let owner_refs = pod.owner_references();
-
-        trace!(
-            event.name = "k8s.get_owners.start",
-            k8s.pod.name = %pod_name,
-            k8s.owner_refs.count = owner_refs.len(),
-            "starting owner chain walk"
-        );
-
         let all_owners = self.walk_owner_chain(pod, store);
 
-        trace!(
-            event.name = "k8s.get_owners.walked",
-            k8s.pod.name = %pod_name,
-            k8s.owners.collected = all_owners.len(),
-            "completed owner chain walk"
-        );
-
         if all_owners.is_empty() {
-            trace!(
-                event.name = "k8s.get_owners.empty",
-                k8s.pod.name = %pod_name,
-                "no owners found in chain"
-            );
             return None;
         }
 
         let filtered = self.filter_owners(all_owners);
-
-        trace!(
-            event.name = "k8s.get_owners.filtered",
-            k8s.pod.name = %pod_name,
-            k8s.owners.filtered = filtered.len(),
-            "completed owner filtering"
-        );
 
         if filtered.is_empty() {
             None
@@ -148,12 +95,6 @@ impl OwnerRelationsManager {
         }
     }
 
-    /// Walks the owner reference chain up to max_depth, collecting all owners encountered.
-    ///
-    /// # Behavior
-    /// - If `max_depth` is 0, returns an empty vector (no owners walked)
-    /// - Stops early if no more owner references are found
-    /// - Stops if MAX_OWNERS limit is reached to prevent resource exhaustion
     fn walk_owner_chain(&self, pod: &Pod, store: &ResourceStore) -> Vec<WorkloadOwner> {
         let mut all_owners = Vec::with_capacity(self.max_depth.min(8));
         let mut current_owners = pod.owner_references().to_vec();
@@ -163,8 +104,6 @@ impl OwnerRelationsManager {
         while !current_owners.is_empty() && depth < self.max_depth && all_owners.len() < MAX_OWNERS
         {
             depth += 1;
-
-            // Process all owners at this level
             let mut next_level_owners = Vec::new();
 
             for owner_ref in current_owners {
@@ -173,22 +112,20 @@ impl OwnerRelationsManager {
                 {
                     all_owners.push(owner.clone());
 
-                    // Update namespace if this owner has one
                     if let Some(ns) = self.get_owner_namespace(&owner) {
                         namespace = ns;
                     }
 
-                    // Queue up the next level of owners
                     if let Some(next_owners) = next_owners_opt {
                         next_level_owners.extend(next_owners);
                     }
                 } else {
-                    trace!(
+                    debug!(
                         event.name = "k8s.owner_ref_missing",
                         k8s.owner.name = %owner_ref.name,
                         k8s.owner.kind = %owner_ref.kind,
                         k8s.namespace = %namespace,
-                        "failed to find owner reference in local store"
+                        "owner reference not found in local store"
                     );
                 }
             }
@@ -208,12 +145,6 @@ impl OwnerRelationsManager {
         all_owners
     }
 
-    /// Filters the list of owners based on include/exclude rules.
-    ///
-    /// Logic:
-    /// - If exclude_kinds contains the kind, exclude it (highest priority)
-    /// - If include_kinds is non-empty and doesn't contain the kind, exclude it
-    /// - Otherwise, include it
     fn filter_owners(&self, owners: Vec<WorkloadOwner>) -> Vec<WorkloadOwner> {
         owners
             .into_iter()
@@ -232,17 +163,14 @@ impl OwnerRelationsManager {
             WorkloadOwner::CronJob(_) => "cronjob",
         };
 
-        // Exclude takes precedence
         if self.exclude_kinds.contains(kind) {
             return false;
         }
 
-        // If include_kinds is empty, include all (that aren't excluded)
         if self.include_kinds.is_empty() {
             return true;
         }
 
-        // Otherwise, only include if in the include list
         self.include_kinds.contains(kind)
     }
 
@@ -254,48 +182,22 @@ impl OwnerRelationsManager {
         store: &ResourceStore,
     ) -> Option<(WorkloadOwner, Option<Vec<OwnerReference>>)> {
         let name = &owner_ref.name;
-        let kind = &owner_ref.kind;
-
-        trace!(
-            event.name = "k8s.lookup_owner.start",
-            k8s.owner.name = %name,
-            k8s.owner.kind = %kind,
-            k8s.namespace = %namespace,
-            "looking up owner in resource store"
-        );
 
         macro_rules! find_in_store {
             ($store_type:ty, $variant:ident) => {{
-                let resources = store.get_by_namespace::<$store_type>(namespace);
-                let resource_count = resources.len();
-                trace!(
-                    event.name = "k8s.lookup_owner.store_check",
-                    k8s.owner.kind = %kind,
-                    k8s.namespace = %namespace,
-                    k8s.resources.count = resource_count,
-                    "checking resource store"
-                );
-
-                resources
-                    .iter()
+                store
+                    .get_by_namespace::<$store_type>(namespace)
+                    .into_iter()
                     .find(|obj| obj.name_any() == *name)
                     .map(|obj| {
                         let meta = K8sObjectMeta::from(obj.as_ref());
                         let next_owners = obj.meta().owner_references.clone();
-                        let next_refs_count = next_owners.as_ref().map(|v| v.len()).unwrap_or(0);
-                        trace!(
-                            event.name = "k8s.lookup_owner.found",
-                            k8s.owner.name = %name,
-                            k8s.owner.kind = %kind,
-                            k8s.owner.next_refs = next_refs_count,
-                            "found owner in store"
-                        );
                         (WorkloadOwner::$variant(meta), next_owners)
                     })
             }};
         }
 
-        let result = match owner_ref.kind.as_str() {
+        match owner_ref.kind.as_str() {
             "ReplicaSet" => find_in_store!(ReplicaSet, ReplicaSet),
             "Deployment" => find_in_store!(Deployment, Deployment),
             "StatefulSet" => find_in_store!(StatefulSet, StatefulSet),
@@ -303,26 +205,14 @@ impl OwnerRelationsManager {
             "Job" => find_in_store!(Job, Job),
             "CronJob" => find_in_store!(CronJob, CronJob),
             _ => {
-                trace!(
+                debug!(
                     event.name = "k8s.unsupported_owner_kind",
                     k8s.owner.kind = %owner_ref.kind,
-                    "owner lookup for this resource kind is not implemented"
+                    "owner lookup for this resource kind is not supported"
                 );
                 None
             }
-        };
-
-        if result.is_none() {
-            trace!(
-                event.name = "k8s.lookup_owner.not_found",
-                k8s.owner.name = %name,
-                k8s.owner.kind = %kind,
-                k8s.namespace = %namespace,
-                "owner not found in resource store"
-            );
         }
-
-        result
     }
 
     /// Gets the namespace from a WorkloadOwner.

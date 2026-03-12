@@ -8,8 +8,8 @@
 
 use std::{collections::HashMap, net::IpAddr};
 
-use k8s_openapi::api::{core::v1::Pod, networking::v1::NetworkPolicySpec};
-use tracing::{debug, trace};
+use k8s_openapi::api::core::v1::Pod;
+use tracing::debug;
 
 use crate::{
     k8s::{
@@ -24,8 +24,6 @@ use crate::{
 #[derive(Debug)]
 pub struct NetworkPolicy {
     pub policy: K8sObjectMeta,
-    #[allow(dead_code)] // TODO: Use for network policy enforcement
-    pub spec: NetworkPolicySpec,
 }
 
 /// Kubernetes decoration processor that correlates a FlowSpan with Kubernetes metadata
@@ -68,12 +66,6 @@ impl<'a> Decorator<'a> {
 
         let src_info = self.enrich(ctx.src_pod.as_ref(), ctx.src_ip).await;
         if let Some(info) = &src_info {
-            trace!(
-                event.name = "k8s.decorator.associated",
-                flow.community_id = %flow_span.attributes.flow_community_id,
-                k8s.direction = "source",
-                "successfully associated source of flow"
-            );
             self.populate_k8s_attributes(
                 &mut decorated_flow,
                 info,
@@ -85,12 +77,6 @@ impl<'a> Decorator<'a> {
 
         let dst_info = self.enrich(ctx.dst_pod.as_ref(), ctx.dst_ip).await;
         if let Some(info) = &dst_info {
-            trace!(
-                event.name = "k8s.decorator.associated",
-                flow.community_id = %flow_span.attributes.flow_community_id,
-                k8s.direction = "destination",
-                "successfully associated destination of flow"
-            );
             self.populate_k8s_attributes(
                 &mut decorated_flow,
                 info,
@@ -123,15 +109,8 @@ impl<'a> Decorator<'a> {
         }
 
         if let Some(service) = self.attributor.get_service_by_ip(ip).await {
-            let service_meta = K8sObjectMeta::from(service.as_ref());
-            let backend_ips = self
-                .attributor
-                .resolve_service_ip_to_backend_ips(ip)
-                .await
-                .unwrap_or_default();
             return Some(DecorationInfo::Service {
-                service: service_meta,
-                backend_ips,
+                service: K8sObjectMeta::from(service.as_ref()),
             });
         }
 
@@ -147,11 +126,6 @@ impl<'a> Decorator<'a> {
             });
         }
 
-        trace!(
-            event.name = "k8s.ip_unattributable",
-            net.ip.address = %ip,
-            "ip could not be attributed to any known kubernetes resource"
-        );
         None
     }
 
@@ -231,7 +205,6 @@ impl<'a> Decorator<'a> {
                     self.set_k8s_attr_opt(flow_span, "node.name", node_name, is_source);
                 }
 
-                // Resolve and populate container information
                 if let Some((container_name, container_image)) =
                     pod.and_then(|p| resolve_pod_container_by_port(p, port))
                     && self.should_extract("container", "name", is_source)
@@ -245,14 +218,12 @@ impl<'a> Decorator<'a> {
                     );
                 }
 
-                // Populate workload controller information for all owners in the chain
                 if let Some(workload_owners) = owners {
                     for workload_owner in workload_owners {
                         self.populate_workload_attributes(flow_span, workload_owner, is_source);
                     }
                 }
 
-                // Populate selector-based relations (NetworkPolicies, Services that select this pod)
                 if let Some(relations) = selector_relations {
                     for relation in relations {
                         self.populate_selector_relation_attributes(flow_span, relation, is_source);
@@ -262,7 +233,7 @@ impl<'a> Decorator<'a> {
             DecorationInfo::Node { node } => {
                 self.populate_common_meta(flow_span, "node", node, is_source, false);
             }
-            DecorationInfo::Service { service, .. } => {
+            DecorationInfo::Service { service } => {
                 self.populate_common_meta(flow_span, "service", service, is_source, true);
             }
             DecorationInfo::EndpointSlice { slice } => {
@@ -302,15 +273,12 @@ impl<'a> Decorator<'a> {
         self.populate_common_meta(flow_span, kind, meta, is_source, false);
     }
 
-    /// Maps selector-based relation metadata to the appropriate K8s attributes.
-    /// Handles resources that have selectors matching the pod (e.g., NetworkPolicy, Service, workload controllers).
     fn populate_selector_relation_attributes(
         &self,
         flow_span: &mut FlowSpan,
         relation: &K8sObjectMeta,
         is_source: bool,
     ) {
-        // Match based on the kind field (case-insensitive comparison)
         match relation.kind.to_lowercase().as_str() {
             "networkpolicy" => {
                 self.set_k8s_attr(flow_span, "networkpolicy.name", &relation.name, is_source);
@@ -348,7 +316,6 @@ impl<'a> Decorator<'a> {
         }
     }
 
-    /// Sets a required Kubernetes attribute by wrapping the value in Some().
     fn set_k8s_attr(
         &self,
         flow_span: &mut FlowSpan,
@@ -359,7 +326,6 @@ impl<'a> Decorator<'a> {
         self.set_k8s_attr_opt(flow_span, attr_name, &Some(value.to_string()), is_source);
     }
 
-    /// Sets an optional Kubernetes attribute using a compact mapping approach.
     fn set_k8s_attr_opt(
         &self,
         flow_span: &mut FlowSpan,
@@ -379,7 +345,6 @@ impl<'a> Decorator<'a> {
             };
         }
 
-        // Get mutable reference to the appropriate k8s attribute based on direction and type
         let field = k8s_attr_mapping! {
             ("cluster.name", source_k8s_cluster_name, destination_k8s_cluster_name),
             ("namespace.name", source_k8s_namespace_name, destination_k8s_namespace_name),
@@ -399,11 +364,10 @@ impl<'a> Decorator<'a> {
         *field = value.clone();
     }
 
-    /// Sets an optional HashMap attribute.
     fn set_k8s_map_attr(
         &self,
         flow_span: &mut FlowSpan,
-        attr_name: &str, // e.g. "pod.annotations"
+        attr_name: &str,
         value: &Option<HashMap<String, String>>,
         is_source: bool,
     ) {
@@ -474,15 +438,12 @@ impl<'a> Decorator<'a> {
         }
     }
 
-    /// Populates network policy decoration in a FlowSpan.
-    /// Converts policy lists to comma-separated strings for telemetry.
     fn populate_network_policies(
         &self,
         flow_span: &mut FlowSpan,
         ingress_policies: &[NetworkPolicy],
         egress_policies: &[NetworkPolicy],
     ) {
-        // Format ingress policies (affecting destination pod)
         if !ingress_policies.is_empty() {
             let policy_names: Vec<String> = ingress_policies
                 .iter()
@@ -497,7 +458,6 @@ impl<'a> Decorator<'a> {
             flow_span.attributes.network_policies_ingress = Some(policy_names);
         }
 
-        // Format egress policies (affecting source pod)
         if !egress_policies.is_empty() {
             let policy_names: Vec<String> = egress_policies
                 .iter()
@@ -513,8 +473,6 @@ impl<'a> Decorator<'a> {
         }
     }
 
-    /// Evaluates NetworkPolicies for a flow and separates them by direction.
-    /// Returns (ingress_policies, egress_policies) for telemetry decoration.
     async fn evaluate_flow_policies(
         &self,
         ctx: &FlowContext,
@@ -522,12 +480,10 @@ impl<'a> Decorator<'a> {
         let mut ingress_policies = Vec::new();
         let mut egress_policies = Vec::new();
 
-        // Get ingress policies that apply to the destination pod
         if let Some(dst_pod) = &ctx.dst_pod {
             ingress_policies = self.get_policies_for_pod(ctx, dst_pod, FlowDirection::Ingress)?;
         }
 
-        // Get egress policies that apply to the source pod
         if let Some(src_pod) = &ctx.src_pod {
             egress_policies = self.get_policies_for_pod(ctx, src_pod, FlowDirection::Egress)?;
         }
@@ -535,8 +491,6 @@ impl<'a> Decorator<'a> {
         Ok((ingress_policies, egress_policies))
     }
 
-    /// Retrieves NetworkPolicies that match a specific pod in the given direction.
-    /// Converts from the internal policy representation to our NetworkPolicy struct.
     fn get_policies_for_pod(
         &self,
         ctx: &FlowContext,
@@ -551,48 +505,32 @@ impl<'a> Decorator<'a> {
             .iter()
             .map(|p| NetworkPolicy {
                 policy: K8sObjectMeta::from(p.as_ref()),
-                spec: p.spec.clone().unwrap_or_default(),
             })
             .collect())
     }
 }
 
-/// Resolves container information from a Pod by matching the specified port.
-///
-/// Logic:
-/// - Searches for a container with a matching containerPort
-/// - Returns None if no container matches the port
-/// - Validates that Kubernetes containerPort is in valid range (1-65535)
-/// - Skips containers without images defined
+/// Resolves container name and image from a Pod by matching the specified port number.
 pub fn resolve_pod_container_by_port(pod: &Pod, port: u16) -> Option<(String, String)> {
     let spec = pod.spec.as_ref()?;
 
-    // Iterate through all containers in the pod
     for container in &spec.containers {
-        // Skip containers without ports defined
         let Some(ports) = container.ports.as_ref() else {
             continue;
         };
 
-        // Check if any of the container's ports match the requested port
         for container_port in ports {
-            // Kubernetes containerPort is i32 but must be in valid port range (1-65535)
-            // Invalid values are rejected by the API server, so we can safely cast
             let port_num = container_port.container_port;
             if port_num > 0 && port_num <= 65535 && port_num as u16 == port {
-                // Found a match! Extract container name and image
-                // Clone is necessary since we're borrowing from the Pod and need owned data
                 let name = container.name.clone();
                 let Some(image_name) = container.image.clone() else {
-                    continue; // Skip containers without image
+                    continue;
                 };
-
                 return Some((name, image_name));
             }
         }
     }
 
-    // No matching container found
     None
 }
 

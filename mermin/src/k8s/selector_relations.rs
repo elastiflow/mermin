@@ -1,9 +1,3 @@
-// selector_relations.rs - Selector-based K8s resource relations
-//
-// This module provides functionality for matching Kubernetes resources based on
-// label selectors defined in other resources (e.g., NetworkPolicy -> Pod via podSelector,
-// Service -> Pod via spec.selector).
-
 use std::collections::BTreeMap;
 
 use k8s_openapi::{
@@ -15,10 +9,9 @@ use k8s_openapi::{
     },
     apimachinery::pkg::apis::meta::v1::{LabelSelector, LabelSelectorRequirement},
 };
-use kube::ResourceExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tracing::{debug, trace, warn};
+use tracing::{debug, warn};
 
 use crate::k8s::attributor::{K8sObjectMeta, ResourceStore};
 
@@ -63,26 +56,7 @@ pub(crate) struct NormalizedRule {
 }
 
 impl SelectorRelationsManager {
-    /// Creates a new SelectorRelationsManager from configuration rules
-    ///
     /// All kind names are normalized to lowercase for case-insensitive matching.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use mermin::k8s::selector_relations::SelectorRelationsManager;
-    /// use mermin::runtime::conf::SelectorRelationRule;
-    ///
-    /// let rules = vec![
-    ///     SelectorRelationRule {
-    ///         kind: "NetworkPolicy".to_string(),
-    ///         to: "Pod".to_string(),
-    ///         selector_match_labels_field: Some("spec.podSelector.matchLabels".to_string()),
-    ///         selector_match_expressions_field: Some("spec.podSelector.matchExpressions".to_string()),
-    ///     },
-    /// ];
-    /// let manager = SelectorRelationsManager::new(rules);
-    /// ```
     pub fn new(rules: Vec<SelectorRelationRule>) -> Self {
         let normalized_rules = rules
             .into_iter()
@@ -197,7 +171,6 @@ impl SelectorRelationsManager {
         }
     }
 
-    /// Finds NetworkPolicies whose podSelector matches the given pod labels
     fn find_matching_network_policies(
         &self,
         pod_labels: &BTreeMap<String, String>,
@@ -205,40 +178,17 @@ impl SelectorRelationsManager {
         rule: &NormalizedRule,
         store: &ResourceStore,
     ) -> Vec<K8sObjectMeta> {
-        let policies = store.get_by_namespace::<NetworkPolicy>(pod_namespace);
-
-        trace!(
-            event.name = "selector_relations.check_network_policies",
-            k8s.namespace = %pod_namespace,
-            k8s.policies.count = policies.len(),
-            "checking NetworkPolicies for selector matches"
-        );
-
-        policies
+        store
+            .get_by_namespace::<NetworkPolicy>(pod_namespace)
             .iter()
             .filter_map(|policy| {
-                let policy_name = policy.name_any();
-
-                // Extract selector from the NetworkPolicy spec
                 let selector = self.extract_selector_from_network_policy(policy, rule)?;
-
-                // Check if selector matches pod labels
-                if self.selector_matches(&selector, pod_labels) {
-                    trace!(
-                        event.name = "selector_relations.match_found",
-                        k8s.networkpolicy.name = %policy_name,
-                        k8s.namespace = %pod_namespace,
-                        "NetworkPolicy selector matches pod labels"
-                    );
-                    Some(K8sObjectMeta::from(policy.as_ref()))
-                } else {
-                    None
-                }
+                self.selector_matches(&selector, pod_labels)
+                    .then(|| K8sObjectMeta::from(policy.as_ref()))
             })
             .collect()
     }
 
-    /// Finds Services whose selector matches the given pod labels
     fn find_matching_services(
         &self,
         pod_labels: &BTreeMap<String, String>,
@@ -246,84 +196,54 @@ impl SelectorRelationsManager {
         rule: &NormalizedRule,
         store: &ResourceStore,
     ) -> Vec<K8sObjectMeta> {
-        let services = store.get_by_namespace::<Service>(pod_namespace);
-
-        trace!(
-            event.name = "selector_relations.check_services",
-            k8s.namespace = %pod_namespace,
-            k8s.services.count = services.len(),
-            "checking Services for selector matches"
-        );
-
-        services
+        store
+            .get_by_namespace::<Service>(pod_namespace)
             .iter()
             .filter_map(|service| {
-                let service_name = service.name_any();
-
-                // Extract selector from the Service spec
                 let selector = self.extract_selector_from_service(service, rule)?;
-
-                // Check if selector matches pod labels
-                if self.selector_matches(&selector, pod_labels) {
-                    trace!(
-                        event.name = "selector_relations.match_found",
-                        k8s.service.name = %service_name,
-                        k8s.namespace = %pod_namespace,
-                        "Service selector matches pod labels"
-                    );
-                    Some(K8sObjectMeta::from(service.as_ref()))
-                } else {
-                    None
-                }
+                self.selector_matches(&selector, pod_labels)
+                    .then(|| K8sObjectMeta::from(service.as_ref()))
             })
             .collect()
     }
 
-    /// Extracts a LabelSelector from a NetworkPolicy based on the rule configuration
     fn extract_selector_from_network_policy(
         &self,
         policy: &NetworkPolicy,
         rule: &NormalizedRule,
     ) -> Option<LabelSelector> {
-        // If custom field paths are specified in the rule, use generic extraction
         if rule.selector_match_labels_field.is_some()
             || rule.selector_match_expressions_field.is_some()
         {
             return self.extract_selector_generic(policy, rule);
         }
 
-        // Otherwise, use default built-in extraction: spec.podSelector
         policy.spec.as_ref().map(|spec| spec.pod_selector.clone())
     }
 
-    /// Extracts a LabelSelector from a Service based on the rule configuration
     fn extract_selector_from_service(
         &self,
         service: &Service,
         rule: &NormalizedRule,
     ) -> Option<LabelSelector> {
-        // If custom field paths are specified in the rule, use generic extraction
         if rule.selector_match_labels_field.is_some()
             || rule.selector_match_expressions_field.is_some()
         {
             return self.extract_selector_generic(service, rule);
         }
 
-        // Otherwise, use default built-in extraction: spec.selector as matchLabels
         let selector_map = service.spec.as_ref()?.selector.as_ref()?;
 
         if selector_map.is_empty() {
             return None;
         }
 
-        // Convert the selector map to a LabelSelector
         Some(LabelSelector {
             match_labels: Some(selector_map.clone()),
             match_expressions: None,
         })
     }
 
-    /// Finds ReplicaSets whose selector matches the given pod labels
     fn find_matching_replicasets(
         &self,
         pod_labels: &BTreeMap<String, String>,
@@ -331,54 +251,30 @@ impl SelectorRelationsManager {
         rule: &NormalizedRule,
         store: &ResourceStore,
     ) -> Vec<K8sObjectMeta> {
-        let replicasets = store.get_by_namespace::<ReplicaSet>(pod_namespace);
-
-        trace!(
-            event.name = "selector_relations.check_replicasets",
-            k8s.namespace = %pod_namespace,
-            k8s.replicasets.count = replicasets.len(),
-            "checking ReplicaSets for selector matches"
-        );
-
-        replicasets
+        store
+            .get_by_namespace::<ReplicaSet>(pod_namespace)
             .iter()
             .filter_map(|rs| {
-                let rs_name = rs.name_any();
                 let selector = self.extract_selector_from_replicaset(rs, rule)?;
-
-                if self.selector_matches(&selector, pod_labels) {
-                    trace!(
-                        event.name = "selector_relations.match_found",
-                        k8s.replicaset.name = %rs_name,
-                        k8s.namespace = %pod_namespace,
-                        "ReplicaSet selector matches pod labels"
-                    );
-                    Some(K8sObjectMeta::from(rs.as_ref()))
-                } else {
-                    None
-                }
+                self.selector_matches(&selector, pod_labels)
+                    .then(|| K8sObjectMeta::from(rs.as_ref()))
             })
             .collect()
     }
 
-    /// Extracts a LabelSelector from a ReplicaSet
     fn extract_selector_from_replicaset(
         &self,
         replicaset: &ReplicaSet,
         rule: &NormalizedRule,
     ) -> Option<LabelSelector> {
-        // If custom field paths are specified in the rule, use generic extraction
         if rule.selector_match_labels_field.is_some()
             || rule.selector_match_expressions_field.is_some()
         {
             return self.extract_selector_generic(replicaset, rule);
         }
-
-        // Otherwise, use default built-in extraction: spec.selector
         Some(replicaset.spec.as_ref()?.selector.clone())
     }
 
-    /// Finds Deployments whose selector matches the given pod labels
     fn find_matching_deployments(
         &self,
         pod_labels: &BTreeMap<String, String>,
@@ -386,54 +282,30 @@ impl SelectorRelationsManager {
         rule: &NormalizedRule,
         store: &ResourceStore,
     ) -> Vec<K8sObjectMeta> {
-        let deployments = store.get_by_namespace::<Deployment>(pod_namespace);
-
-        trace!(
-            event.name = "selector_relations.check_deployments",
-            k8s.namespace = %pod_namespace,
-            k8s.deployments.count = deployments.len(),
-            "checking Deployments for selector matches"
-        );
-
-        deployments
+        store
+            .get_by_namespace::<Deployment>(pod_namespace)
             .iter()
             .filter_map(|deployment| {
-                let deployment_name = deployment.name_any();
                 let selector = self.extract_selector_from_deployment(deployment, rule)?;
-
-                if self.selector_matches(&selector, pod_labels) {
-                    trace!(
-                        event.name = "selector_relations.match_found",
-                        k8s.deployment.name = %deployment_name,
-                        k8s.namespace = %pod_namespace,
-                        "Deployment selector matches pod labels"
-                    );
-                    Some(K8sObjectMeta::from(deployment.as_ref()))
-                } else {
-                    None
-                }
+                self.selector_matches(&selector, pod_labels)
+                    .then(|| K8sObjectMeta::from(deployment.as_ref()))
             })
             .collect()
     }
 
-    /// Extracts a LabelSelector from a Deployment
     fn extract_selector_from_deployment(
         &self,
         deployment: &Deployment,
         rule: &NormalizedRule,
     ) -> Option<LabelSelector> {
-        // If custom field paths are specified in the rule, use generic extraction
         if rule.selector_match_labels_field.is_some()
             || rule.selector_match_expressions_field.is_some()
         {
             return self.extract_selector_generic(deployment, rule);
         }
-
-        // Otherwise, use default built-in extraction: spec.selector
         Some(deployment.spec.as_ref()?.selector.clone())
     }
 
-    /// Finds StatefulSets whose selector matches the given pod labels
     fn find_matching_statefulsets(
         &self,
         pod_labels: &BTreeMap<String, String>,
@@ -441,54 +313,30 @@ impl SelectorRelationsManager {
         rule: &NormalizedRule,
         store: &ResourceStore,
     ) -> Vec<K8sObjectMeta> {
-        let statefulsets = store.get_by_namespace::<StatefulSet>(pod_namespace);
-
-        trace!(
-            event.name = "selector_relations.check_statefulsets",
-            k8s.namespace = %pod_namespace,
-            k8s.statefulsets.count = statefulsets.len(),
-            "checking StatefulSets for selector matches"
-        );
-
-        statefulsets
+        store
+            .get_by_namespace::<StatefulSet>(pod_namespace)
             .iter()
             .filter_map(|sts| {
-                let sts_name = sts.name_any();
                 let selector = self.extract_selector_from_statefulset(sts, rule)?;
-
-                if self.selector_matches(&selector, pod_labels) {
-                    trace!(
-                        event.name = "selector_relations.match_found",
-                        k8s.statefulset.name = %sts_name,
-                        k8s.namespace = %pod_namespace,
-                        "StatefulSet selector matches pod labels"
-                    );
-                    Some(K8sObjectMeta::from(sts.as_ref()))
-                } else {
-                    None
-                }
+                self.selector_matches(&selector, pod_labels)
+                    .then(|| K8sObjectMeta::from(sts.as_ref()))
             })
             .collect()
     }
 
-    /// Extracts a LabelSelector from a StatefulSet
     fn extract_selector_from_statefulset(
         &self,
         statefulset: &StatefulSet,
         rule: &NormalizedRule,
     ) -> Option<LabelSelector> {
-        // If custom field paths are specified in the rule, use generic extraction
         if rule.selector_match_labels_field.is_some()
             || rule.selector_match_expressions_field.is_some()
         {
             return self.extract_selector_generic(statefulset, rule);
         }
-
-        // Otherwise, use default built-in extraction: spec.selector
         Some(statefulset.spec.as_ref()?.selector.clone())
     }
 
-    /// Finds DaemonSets whose selector matches the given pod labels
     fn find_matching_daemonsets(
         &self,
         pod_labels: &BTreeMap<String, String>,
@@ -496,54 +344,30 @@ impl SelectorRelationsManager {
         rule: &NormalizedRule,
         store: &ResourceStore,
     ) -> Vec<K8sObjectMeta> {
-        let daemonsets = store.get_by_namespace::<DaemonSet>(pod_namespace);
-
-        trace!(
-            event.name = "selector_relations.check_daemonsets",
-            k8s.namespace = %pod_namespace,
-            k8s.daemonsets.count = daemonsets.len(),
-            "checking DaemonSets for selector matches"
-        );
-
-        daemonsets
+        store
+            .get_by_namespace::<DaemonSet>(pod_namespace)
             .iter()
             .filter_map(|ds| {
-                let ds_name = ds.name_any();
                 let selector = self.extract_selector_from_daemonset(ds, rule)?;
-
-                if self.selector_matches(&selector, pod_labels) {
-                    trace!(
-                        event.name = "selector_relations.match_found",
-                        k8s.daemonset.name = %ds_name,
-                        k8s.namespace = %pod_namespace,
-                        "DaemonSet selector matches pod labels"
-                    );
-                    Some(K8sObjectMeta::from(ds.as_ref()))
-                } else {
-                    None
-                }
+                self.selector_matches(&selector, pod_labels)
+                    .then(|| K8sObjectMeta::from(ds.as_ref()))
             })
             .collect()
     }
 
-    /// Extracts a LabelSelector from a DaemonSet
     fn extract_selector_from_daemonset(
         &self,
         daemonset: &DaemonSet,
         rule: &NormalizedRule,
     ) -> Option<LabelSelector> {
-        // If custom field paths are specified in the rule, use generic extraction
         if rule.selector_match_labels_field.is_some()
             || rule.selector_match_expressions_field.is_some()
         {
             return self.extract_selector_generic(daemonset, rule);
         }
-
-        // Otherwise, use default built-in extraction: spec.selector
         Some(daemonset.spec.as_ref()?.selector.clone())
     }
 
-    /// Finds Jobs whose selector matches the given pod labels
     fn find_matching_jobs(
         &self,
         pod_labels: &BTreeMap<String, String>,
@@ -551,49 +375,26 @@ impl SelectorRelationsManager {
         rule: &NormalizedRule,
         store: &ResourceStore,
     ) -> Vec<K8sObjectMeta> {
-        let jobs = store.get_by_namespace::<Job>(pod_namespace);
-
-        trace!(
-            event.name = "selector_relations.check_jobs",
-            k8s.namespace = %pod_namespace,
-            k8s.jobs.count = jobs.len(),
-            "checking Jobs for selector matches"
-        );
-
-        jobs.iter()
+        store
+            .get_by_namespace::<Job>(pod_namespace)
+            .iter()
             .filter_map(|job| {
-                let job_name = job.name_any();
                 let selector = self.extract_selector_from_job(job, rule)?;
-
-                if self.selector_matches(&selector, pod_labels) {
-                    trace!(
-                        event.name = "selector_relations.match_found",
-                        k8s.job.name = %job_name,
-                        k8s.namespace = %pod_namespace,
-                        "Job selector matches pod labels"
-                    );
-                    Some(K8sObjectMeta::from(job.as_ref()))
-                } else {
-                    None
-                }
+                self.selector_matches(&selector, pod_labels)
+                    .then(|| K8sObjectMeta::from(job.as_ref()))
             })
             .collect()
     }
 
-    /// Extracts a LabelSelector from a Job
     fn extract_selector_from_job(&self, job: &Job, rule: &NormalizedRule) -> Option<LabelSelector> {
-        // If custom field paths are specified in the rule, use generic extraction
         if rule.selector_match_labels_field.is_some()
             || rule.selector_match_expressions_field.is_some()
         {
             return self.extract_selector_generic(job, rule);
         }
-
-        // Otherwise, use default built-in extraction: spec.selector
         job.spec.as_ref()?.selector.clone()
     }
 
-    /// Finds CronJobs whose job template selector matches the given pod labels
     fn find_matching_cronjobs(
         &self,
         pod_labels: &BTreeMap<String, String>,
@@ -601,50 +402,28 @@ impl SelectorRelationsManager {
         rule: &NormalizedRule,
         store: &ResourceStore,
     ) -> Vec<K8sObjectMeta> {
-        let cronjobs = store.get_by_namespace::<CronJob>(pod_namespace);
-
-        trace!(
-            event.name = "selector_relations.check_cronjobs",
-            k8s.namespace = %pod_namespace,
-            k8s.cronjobs.count = cronjobs.len(),
-            "checking CronJobs for selector matches"
-        );
-
-        cronjobs
+        store
+            .get_by_namespace::<CronJob>(pod_namespace)
             .iter()
             .filter_map(|cronjob| {
-                let cronjob_name = cronjob.name_any();
                 let selector = self.extract_selector_from_cronjob(cronjob, rule)?;
-
-                if self.selector_matches(&selector, pod_labels) {
-                    trace!(
-                        event.name = "selector_relations.match_found",
-                        k8s.cronjob.name = %cronjob_name,
-                        k8s.namespace = %pod_namespace,
-                        "CronJob selector matches pod labels"
-                    );
-                    Some(K8sObjectMeta::from(cronjob.as_ref()))
-                } else {
-                    None
-                }
+                self.selector_matches(&selector, pod_labels)
+                    .then(|| K8sObjectMeta::from(cronjob.as_ref()))
             })
             .collect()
     }
 
-    /// Extracts a LabelSelector from a CronJob's job template
     fn extract_selector_from_cronjob(
         &self,
         cronjob: &CronJob,
         rule: &NormalizedRule,
     ) -> Option<LabelSelector> {
-        // If custom field paths are specified in the rule, use generic extraction
         if rule.selector_match_labels_field.is_some()
             || rule.selector_match_expressions_field.is_some()
         {
             return self.extract_selector_generic(cronjob, rule);
         }
 
-        // Otherwise, use default built-in extraction: spec.jobTemplate.spec.selector
         cronjob
             .spec
             .as_ref()?
@@ -655,17 +434,11 @@ impl SelectorRelationsManager {
             .clone()
     }
 
-    /// Checks if a label selector matches the given labels
-    ///
-    /// This implements the Kubernetes label selector matching logic:
-    /// - All matchLabels must be present with exact values
-    /// - All matchExpressions must evaluate to true
     pub(crate) fn selector_matches(
         &self,
         selector: &LabelSelector,
         labels: &BTreeMap<String, String>,
     ) -> bool {
-        // Check match_labels
         if let Some(match_labels) = &selector.match_labels {
             for (key, value) in match_labels {
                 if labels.get(key) != Some(value) {
@@ -674,7 +447,6 @@ impl SelectorRelationsManager {
             }
         }
 
-        // Check match_expressions
         if let Some(match_expressions) = &selector.match_expressions {
             for expr in match_expressions {
                 if !self.expression_matches(expr, labels) {
@@ -686,7 +458,6 @@ impl SelectorRelationsManager {
         true
     }
 
-    /// Checks if a label selector requirement matches the given labels
     fn expression_matches(
         &self,
         expr: &LabelSelectorRequirement,
@@ -724,29 +495,18 @@ impl SelectorRelationsManager {
         }
     }
 
-    /// Generic selector extraction using JSON field paths from rule configuration.
-    ///
-    /// This method enables dynamic field path extraction for CRDs and custom resources
-    /// where selectors may be at non-standard locations.
-    ///
-    /// # Arguments
-    /// * `resource` - The resource to extract selector from (must be serializable to JSON)
-    /// * `rule` - The rule containing field paths to matchLabels and matchExpressions
-    ///
-    /// # Returns
-    /// A `LabelSelector` if extraction succeeds, None otherwise
+    /// Extracts a `LabelSelector` from a resource using JSON field paths defined in the rule.
+    /// Enables selector matching for CRDs where selectors may be at non-standard locations.
     pub(crate) fn extract_selector_generic<T: serde::Serialize>(
         &self,
         resource: &T,
         rule: &NormalizedRule,
     ) -> Option<LabelSelector> {
-        // Serialize resource to JSON for field path extraction
         let json_value = serde_json::to_value(resource).ok()?;
 
         let mut selector = LabelSelector::default();
         let mut has_content = false;
 
-        // Extract matchLabels if field path is specified
         if let Some(labels_path) = &rule.selector_match_labels_field
             && let Some(labels_value) = self.extract_json_field(&json_value, labels_path)
             && let Some(labels_map) = labels_value.as_object()
@@ -762,7 +522,6 @@ impl SelectorRelationsManager {
             }
         }
 
-        // Extract matchExpressions if field path is specified
         if let Some(expr_path) = &rule.selector_match_expressions_field
             && let Some(expressions_value) = self.extract_json_field(&json_value, expr_path)
             && let Some(expr_array) = expressions_value.as_array()
@@ -781,11 +540,6 @@ impl SelectorRelationsManager {
         if has_content { Some(selector) } else { None }
     }
 
-    /// Extracts a field from a JSON value using a dot-separated path.
-    ///
-    /// # Examples
-    /// - Path "spec.selector" on {"spec": {"selector": {...}}} returns the selector object
-    /// - Path "spec.podSelector.matchLabels" navigates through nested objects
     fn extract_json_field<'a>(&self, value: &'a Value, path: &str) -> Option<&'a Value> {
         let parts: Vec<&str> = path.split('.').collect();
         let mut current = value;
@@ -797,16 +551,6 @@ impl SelectorRelationsManager {
         Some(current)
     }
 
-    /// Parses a JSON value into a LabelSelectorRequirement.
-    ///
-    /// Expected JSON structure:
-    /// ```json
-    /// {
-    ///   "key": "environment",
-    ///   "operator": "In",
-    ///   "values": ["prod", "staging"]
-    /// }
-    /// ```
     fn parse_label_selector_requirement(&self, value: &Value) -> Option<LabelSelectorRequirement> {
         let obj = value.as_object()?;
 
