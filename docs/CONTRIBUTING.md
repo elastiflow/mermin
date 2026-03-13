@@ -166,7 +166,35 @@ set log_level = "info" in their configuration.
 - Reference issues and pull requests in the footer.
 - **PR titles must also follow this format**: Your PR title must be a valid conventional commit (lowercase description).
 
-For how these commits drive the release process (automatic release PRs and version bumps), see [Release and deploy flow](contributor-guide/development-workflow.md#release-and-deploy-flow) in the Development Workflow.
+### Release and deploy flow
+
+Releases are driven by conventional commits and automated release pull requests. You merge normal feature or bugfix PRs using conventional commits; CI aggregates the commit types, opens a release PR that bumps chart versions and changelog entries, and when you merge that release PR CI publishes the new images and Helm charts.
+
+#### Mermin chart (main chart)
+
+For the main `mermin` chart:
+
+1. **Merge regular PRs**: Use conventional commits for all changes that land in `main` (or release branches).
+2. **CI opens a release PR**: The release workflow determines the correct semver bump (major, minor, or patch) from the commit types, then opens a PR that updates:
+   - `charts/mermin/Chart.yaml` (`version` and `appVersion`)
+   - `mermin/Cargo.toml`
+   - Changelog entries
+3. **Publish on merge**: When the release PR is merged, CI publishes:
+   - A GitHub release
+   - Updated Docker images
+   - The updated Helm chart
+
+You do not bump versions by hand for the main Mermin chart or images; the release PR created by CI handles it.
+
+#### Stack chart (`mermin-netobserv-os-stack`)
+
+To update and release the `mermin-netobserv-os-stack` chart (for example, to pick up a newer `mermin` chart version or other dependency versions):
+
+1. **Create a branch**: Branch from `main`.
+2. **Update dependencies**: Edit the `dependencies` versions in `charts/mermin-netobserv-os-stack/Chart.yaml` to the versions you want the stack chart to use.
+3. **Update Helm deps**: Run `helm dep update` in the `charts/mermin-netobserv-os-stack` directory to refresh `Chart.lock` and the `charts/` directory.
+4. **PR and merge**: Commit and push, open a PR, and merge it with conventional commits as usual.
+5. **Release PR and publish**: CI opens a release PR that bumps `charts/mermin-netobserv-os-stack/Chart.yaml` (`version` and `appVersion`). Merge that release PR to publish the new stack chart version.
 
 ## Pull Request Process
 

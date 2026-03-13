@@ -472,29 +472,6 @@ kind delete cluster --name atlantis
 
 > **Note**: Deleting the kind cluster is sufficient to remove all workloads and namespaces at once. The individual uninstall steps above are only necessary if you want to remove a specific component while keeping the cluster running.
 
-## Release and deploy flow
-
-Releases are driven by conventional commits and automated release pull requests. Developers merge normal feature or bugfix PRs using conventional commits. The CI will aggregate the commit types, open a release PR that bumps the chart versions and changelog, and publish the new images and Helm charts when the release PR is merged.
-
-### Mermin chart (main deploy flow)
-
-PRs are merged using **conventional commits** (see [Commit Message Guidelines](../CONTRIBUTING.md#commit-message-guidelines)). CI/CD uses the aggregated commit types to decide the semver bump (major, minor, or patch). From there, the CI/CD pipeline will automatically:
-
-1. **Create a release PR**: It will open a PR that bumps `charts/mermin/Chart.yaml` (`version` and `appVersion`), `mermin/Cargo.toml`, and updates the changelog.
-2. **Publish on merge**: When the release PR is merged, CI publishes the GitHub release, Docker images, and Helm chart.
-
-You do __NOT__ need to bump any versions by hand for Mermin's charts or Docker images. The release PR created by CI handles that automatically.
-
-### Stack chart (mermin-netobserv-os-stack)
-
-To update the `mermin-netobserv-os-stack` chart (for example, to pick up a newer `mermin` chart version):
-
-1. **Create a branch**: Branch from `main`.
-2. **Update dependencies**: Edit the `dependencies` versions in `charts/mermin-netobserv-os-stack/Chart.yaml` to the new version you want the stack chart to use.
-3. **Update Helm deps**: Run `helm dep update` in the `charts/mermin-netobserv-os-stack` directory to refresh the `Chart.lock` and the `charts/` directory.
-4. **PR and merge**: Commit and push, then open a PR, and merge it with conventional commits, like usual.
-5. **Release PR and publish**: CI will open a release PR that bumps the `charts/mermin-netobserv-os-stack/Chart.yaml` (`version` and `appVersion`). Merge that release PR to publish a new stack chart version!
-
 ## Cross-Compiling
 
 To build a Linux binary from a different OS (like macOS), you can cross-compile. The following command builds for a
