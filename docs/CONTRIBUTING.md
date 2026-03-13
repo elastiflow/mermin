@@ -166,6 +166,8 @@ set log_level = "info" in their configuration.
 - Reference issues and pull requests in the footer.
 - **PR titles must also follow this format**: Your PR title must be a valid conventional commit (lowercase description).
 
+For how these commits drive the release process (automatic release PRs and version bumps), see [Release and deploy flow](contributor-guide/development-workflow.md#release-and-deploy-flow) in the Development Workflow.
+
 ## Pull Request Process
 
 ### Before Submitting
