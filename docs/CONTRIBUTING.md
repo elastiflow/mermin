@@ -283,12 +283,11 @@ Helm charts when the release PR is merged.
 
 ### Mermin Chart (main deploy flow)
 
-PRs are merged using **conventional commits** (see [Commit Message Guidelines]
-(../CONTRIBUTING.md#commit-message-guidelines)). CI/CD uses the aggregated commit types to decide 
+PRs are merged using **conventional commits** (see [Commit Message Guidelines](#commit-message-guidelines)). CI/CD uses the aggregated commit types to decide 
 the semver bump (major, minor, or patch). From there, the CI/CD pipeline will automatically:
 
 1. **Create a release PR**: It will open a PR that bumps `charts/mermin/Chart.yaml` (`version` 
-and `appVersion`), `mermin/Cargo.toml`, and updates the changelog.
+and `appVersion`) and updates the changelog.
 2. **Publish on merge**: When the release PR is merged, CI publishes the GitHub release, Docker 
 images, and Helm chart.
 
