@@ -70,7 +70,7 @@ use crate::{
 /// - Worker update vs. Poller record: Safe — poller clones current state
 /// - Worker update vs. Timeout removal: Safe — worker finds entry missing, no-op
 /// - Poller record vs. Timeout: Safe — both operate on the same shard lock
-pub type FlowStore = Arc<DashMap<String, FlowEntry, FxBuildHasher>>;
+pub type FlowStore = Arc<DashMap<Arc<str>, FlowEntry, FxBuildHasher>>;
 
 /// Entry in the flow map containing the flow span.
 pub struct FlowEntry {
@@ -92,7 +92,7 @@ impl FlowSpanComponents {
         let flow_span_tx = self.flow_span_tx.clone();
 
         let flush_future = async {
-            let flow_keys: Vec<String> =
+            let flow_keys: Vec<Arc<str>> =
                 flow_store.iter().map(|entry| entry.key().clone()).collect();
             let total_flows = flow_keys.len();
 
@@ -709,13 +709,16 @@ impl FlowWorker {
         }
 
         let (src_addr, dst_addr) = flow_key_to_ip_addrs(&event.flow_key)?;
-        let community_id = self.community_id_generator.generate(
-            src_addr,
-            dst_addr,
-            event.flow_key.src_port,
-            event.flow_key.dst_port,
-            event.flow_key.protocol,
-        );
+        let community_id: Arc<str> = self
+            .community_id_generator
+            .generate(
+                src_addr,
+                dst_addr,
+                event.flow_key.src_port,
+                event.flow_key.dst_port,
+                event.flow_key.protocol,
+            )
+            .into();
 
         self.create_flow_span(&community_id, &event.flow_key, &stats)
             .await?;
@@ -991,7 +994,7 @@ impl FlowWorker {
             timeout_duration: Duration::from_secs(0),
         };
 
-        self.insert_flow(community_id.to_string(), span, timeout);
+        self.insert_flow(Arc::from(community_id), span, timeout);
 
         let interface_name = iface_name.as_deref().unwrap_or("unknown");
         metrics::registry::PROCESSING_TOTAL
@@ -1059,7 +1062,7 @@ impl FlowWorker {
         }
     }
 
-    fn insert_flow(&self, community_id: String, mut flow_span: FlowSpan, timeout: Duration) {
+    fn insert_flow(&self, community_id: Arc<str>, mut flow_span: FlowSpan, timeout: Duration) {
         let now = std::time::SystemTime::now();
         flow_span.last_recorded_time = now;
         flow_span.last_activity_time = flow_span.end_time;
@@ -1154,9 +1157,9 @@ impl FlowPoller {
 
                     let mut flows_to_flush = Vec::new();
                     for entry in self.flow_store.iter() {
-                        let community_id = entry.key();
-                        if hash_string(community_id) % self.num_pollers == self.id {
-                            flows_to_flush.push(community_id.clone());
+                        let community_id = entry.key().clone();
+                        if hash_string(&community_id) % self.num_pollers == self.id {
+                            flows_to_flush.push(community_id);
                         }
                     }
 
@@ -1186,10 +1189,10 @@ impl FlowPoller {
 
                 let collection_start = std::time::Instant::now();
                 for entry in self.flow_store.iter() {
-                    let community_id = entry.key();
+                    let community_id = entry.key().clone();
 
                     // Partition: only process flows hashed to this poller
-                    if hash_string(community_id) % self.num_pollers != self.id {
+                    if hash_string(&community_id) % self.num_pollers != self.id {
                         flows_skipped_partition += 1;
                         continue;
                     }
@@ -1234,7 +1237,7 @@ impl FlowPoller {
                 let record_start = std::time::Instant::now();
                 for community_id in &flows_to_record {
                     flows_recorded += 1;
-                    if !record_flow(community_id, &self.flow_store, &self.flow_stats_map, &self.flow_span_tx).await {
+                    if !record_flow(community_id.as_ref(), &self.flow_store, &self.flow_stats_map, &self.flow_span_tx).await {
                         // Export channel closed, stop poller
                         warn!(
                             event.name = "flow_poller.stopped",
@@ -1248,7 +1251,7 @@ impl FlowPoller {
                 let record_duration = record_start.elapsed();
 
                 let timeout_start = std::time::Instant::now();
-                for community_id in flows_to_remove.iter() {
+                for community_id in &flows_to_remove {
                     timeout_and_remove_flow(
                         community_id.clone(),
                         &self.flow_store,
@@ -1755,18 +1758,18 @@ async fn record_flow(
 
 /// Timeout and remove a flow, recording it one final time if it has packets.
 pub async fn timeout_and_remove_flow(
-    community_id: String,
+    community_id: Arc<str>,
     flow_store: &FlowStore,
     flow_stats_map: &Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
     flow_span_tx: &mpsc::Sender<FlowSpan>,
 ) {
-    let (ebpf_key, boot_time_offset) = if let Some(entry) = flow_store.get(&community_id) {
+    let (ebpf_key, boot_time_offset) = if let Some(entry) = flow_store.get(community_id.as_ref()) {
         (entry.flow_span.flow_key, entry.flow_span.boot_time_offset)
     } else {
         return;
     };
 
-    let entry = match flow_store.remove(&community_id) {
+    let entry = match flow_store.remove(community_id.as_ref()) {
         Some((_, entry)) => entry,
         None => return,
     };
@@ -2052,15 +2055,15 @@ pub async fn orphan_scanner_task(
                         Err(_) => continue, // Skip invalid IP version
                     };
 
-                    let community_id = community_id_generator.generate(
+                    let community_id: Arc<str> = community_id_generator.generate(
                         src_addr,
                         dst_addr,
                         key.src_port,
                         key.dst_port,
                         key.protocol,
-                    );
+                    ).into();
 
-                    if flow_store.contains_key(&community_id) {
+                    if flow_store.contains_key(community_id.as_ref()) {
                         // Entry is old but still being tracked - don't remove
                         continue;
                     }
@@ -2541,7 +2544,7 @@ mod tests {
     async fn timeout_and_remove_flow_sends_span_and_cleans_store() {
         let flow_store = Arc::new(DashMap::with_hasher(FxBuildHasher::default()));
         let (flow_span_tx, mut flow_span_rx) = mpsc::channel(100);
-        let community_id = "test_flow_1".to_string();
+        let community_id: Arc<str> = Arc::from("test_flow_1");
         let flow_key = FlowKey::default();
 
         flow_store.insert(
@@ -2552,7 +2555,7 @@ mod tests {
         );
         assert_eq!(flow_store.len(), 1);
 
-        let mut entry = flow_store.remove(&community_id).unwrap().1;
+        let mut entry = flow_store.remove(community_id.as_ref()).unwrap().1;
         entry.flow_span.attributes.flow_end_reason = Some(FlowEndReason::IdleTimeout);
         let _ = flow_span_tx.send(entry.flow_span).await;
 
@@ -2881,7 +2884,7 @@ mod tests {
             FxBuildHasher::default(),
         ));
         let (flow_span_tx, mut flow_span_rx) = mpsc::channel(100);
-        let community_id = "test_cid".to_string();
+        let community_id: Arc<str> = Arc::from("test_cid");
 
         let mut span = create_test_flow_span(FlowKey::default());
         span.attributes.flow_packets_delta = 10;
@@ -2891,7 +2894,7 @@ mod tests {
         assert_eq!(flow_store.len(), 1);
 
         // Simulate the removal + emit that timeout_and_remove_flow performs.
-        let entry = flow_store.remove(&community_id).unwrap().1;
+        let entry = flow_store.remove(community_id.as_ref()).unwrap().1;
         assert!(
             flow_store.is_empty(),
             "entry must be removed from flow_store"

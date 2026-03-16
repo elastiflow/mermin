@@ -697,7 +697,8 @@ pub fn init_bootstrap_logger(cli: &Cli) -> LogReloadHandles {
     tracing_subscriber::registry()
         .with(filter_layer)
         .with(fmt_layer)
-        .init();
+        .try_init()
+        .ok();
 
     info!(
         event.name = "system.bootstrap_logger_initialized",
