@@ -8,7 +8,7 @@ Ensure you have the following installed:
 
 1. **Stable Rust Toolchain**: `rustup toolchain install stable`
 2. **Nightly Rust Toolchain**: `rustup toolchain install nightly --component rust-src`
-3. **bpf-linker**: `cargo install bpf-linker` (use `--no-default-features` on macOS — optionally specify your llvm version with `--features llvm-21`)
+3. **bpf-linker**: `cargo install bpf-linker` (use `--no-default-features` on macOS - optionally specify your llvm version with `--features llvm-21`)
 4. (if cross-compiling) **rustup target**: `rustup target add ${ARCH}-unknown-linux-musl`
 5. (if cross-compiling) **LLVM**: (e.g.) `brew install llvm` (on macOS)
 6. (if cross-compiling) **C toolchain**: (e.g.) [`brew install filosottile/musl-cross/musl-cross`](https://github.com/FiloSottile/homebrew-musl-cross) (on macOS)
