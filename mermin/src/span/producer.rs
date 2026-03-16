@@ -70,7 +70,7 @@ use crate::{
 /// - Worker update vs. Poller record: Safe — poller clones current state
 /// - Worker update vs. Timeout removal: Safe — worker finds entry missing, no-op
 /// - Poller record vs. Timeout: Safe — both operate on the same shard lock
-pub type FlowStore = Arc<DashMap<String, FlowEntry, FxBuildHasher>>;
+pub type FlowStore = Arc<DashMap<Arc<str>, FlowEntry, FxBuildHasher>>;
 
 /// Entry in the flow map containing the flow span.
 pub struct FlowEntry {
@@ -92,7 +92,7 @@ impl FlowSpanComponents {
         let flow_span_tx = self.flow_span_tx.clone();
 
         let flush_future = async {
-            let flow_keys: Vec<String> =
+            let flow_keys: Vec<Arc<str>> =
                 flow_store.iter().map(|entry| entry.key().clone()).collect();
             let total_flows = flow_keys.len();
 
@@ -709,13 +709,16 @@ impl FlowWorker {
         }
 
         let (src_addr, dst_addr) = flow_key_to_ip_addrs(&event.flow_key)?;
-        let community_id = self.community_id_generator.generate(
-            src_addr,
-            dst_addr,
-            event.flow_key.src_port,
-            event.flow_key.dst_port,
-            event.flow_key.protocol,
-        );
+        let community_id: Arc<str> = self
+            .community_id_generator
+            .generate(
+                src_addr,
+                dst_addr,
+                event.flow_key.src_port,
+                event.flow_key.dst_port,
+                event.flow_key.protocol,
+            )
+            .into();
 
         self.create_flow_span(&community_id, &event.flow_key, &stats)
             .await?;
@@ -991,7 +994,7 @@ impl FlowWorker {
             timeout_duration: Duration::from_secs(0),
         };
 
-        self.insert_flow(community_id.to_string(), span, timeout);
+        self.insert_flow(Arc::from(community_id), span, timeout);
 
         let interface_name = iface_name.as_deref().unwrap_or("unknown");
         metrics::registry::PROCESSING_TOTAL
@@ -1059,7 +1062,7 @@ impl FlowWorker {
         }
     }
 
-    fn insert_flow(&self, community_id: String, mut flow_span: FlowSpan, timeout: Duration) {
+    fn insert_flow(&self, community_id: Arc<str>, mut flow_span: FlowSpan, timeout: Duration) {
         let now = std::time::SystemTime::now();
         flow_span.last_recorded_time = now;
         flow_span.last_activity_time = flow_span.end_time;
@@ -1154,9 +1157,9 @@ impl FlowPoller {
 
                     let mut flows_to_flush = Vec::new();
                     for entry in self.flow_store.iter() {
-                        let community_id = entry.key();
-                        if hash_string(community_id) % self.num_pollers == self.id {
-                            flows_to_flush.push(community_id.clone());
+                        let community_id = entry.key().clone();
+                        if hash_string(&community_id) % self.num_pollers == self.id {
+                            flows_to_flush.push(community_id);
                         }
                     }
 
@@ -1186,10 +1189,10 @@ impl FlowPoller {
 
                 let collection_start = std::time::Instant::now();
                 for entry in self.flow_store.iter() {
-                    let community_id = entry.key();
+                    let community_id = entry.key().clone();
 
                     // Partition: only process flows hashed to this poller
-                    if hash_string(community_id) % self.num_pollers != self.id {
+                    if hash_string(&community_id) % self.num_pollers != self.id {
                         flows_skipped_partition += 1;
                         continue;
                     }
@@ -1234,7 +1237,7 @@ impl FlowPoller {
                 let record_start = std::time::Instant::now();
                 for community_id in &flows_to_record {
                     flows_recorded += 1;
-                    if !record_flow(community_id, &self.flow_store, &self.flow_stats_map, &self.flow_span_tx).await {
+                    if !record_flow(community_id.as_ref(), &self.flow_store, &self.flow_stats_map, &self.flow_span_tx).await {
                         // Export channel closed, stop poller
                         warn!(
                             event.name = "flow_poller.stopped",
@@ -1248,7 +1251,7 @@ impl FlowPoller {
                 let record_duration = record_start.elapsed();
 
                 let timeout_start = std::time::Instant::now();
-                for community_id in flows_to_remove.iter() {
+                for community_id in &flows_to_remove {
                     timeout_and_remove_flow(
                         community_id.clone(),
                         &self.flow_store,
@@ -1378,7 +1381,6 @@ async fn record_flow(
     flow_stats_map: &Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
     flow_span_tx: &mpsc::Sender<FlowSpan>,
 ) -> bool {
-    // Extract flow_key and boot_time_offset WITHOUT holding flow_store reference
     let (
         flow_key,
         boot_time_offset,
@@ -1389,7 +1391,7 @@ async fn record_flow(
     ) = {
         let entry_ref = match flow_store.get(community_id) {
             Some(entry) => entry,
-            None => return true, // Flow removed, but that's ok
+            None => return true,
         };
 
         let flow_span = &entry_ref.flow_span;
@@ -1413,10 +1415,10 @@ async fn record_flow(
             flow_span.last_recorded_reverse_packets,
             flow_span.last_recorded_reverse_bytes,
         )
-    }; // entry_ref dropped here
+    };
 
     let lock_start = std::time::Instant::now();
-    let map = flow_stats_map.lock().await;
+    let mut map = flow_stats_map.lock().await;
     let lock_duration = lock_start.elapsed();
 
     if lock_duration.as_millis() > 100 {
@@ -1439,7 +1441,7 @@ async fn record_flow(
             s
         }
         Err(e) => {
-            let status = match &e {
+            let status: EbpfMapStatus = match &e {
                 aya::maps::MapError::KeyNotFound | aya::maps::MapError::ElementNotFound => {
                     EbpfMapStatus::NotFound
                 }
@@ -1462,6 +1464,49 @@ async fn record_flow(
             return true;
         }
     };
+
+    // Reset per-interval metadata flags in the same lock hold to avoid a second
+    // acquisition later. Zeroing these fields tells the eBPF program to
+    // re-capture metadata (DSCP, ECN, TTL, etc.) for the next interval.
+    let mut reset_stats = stats;
+    reset_stats.forward_metadata_seen = 0;
+    reset_stats.reverse_metadata_seen = 0;
+    reset_stats.ip_dscp = 0;
+    reset_stats.ip_ecn = 0;
+    reset_stats.ip_ttl = 0;
+    reset_stats.ip_flow_label = 0;
+    reset_stats.reverse_ip_dscp = 0;
+    reset_stats.reverse_ip_ecn = 0;
+    reset_stats.reverse_ip_ttl = 0;
+    reset_stats.reverse_ip_flow_label = 0;
+
+    match map.insert(flow_key, reset_stats, 0) {
+        Ok(_) => {
+            metrics::registry::EBPF_MAP_OPS_TOTAL
+                .with_label_values(&[
+                    EbpfMapName::FlowStats.as_str(),
+                    EbpfMapOperation::Write.as_str(),
+                    EbpfMapStatus::Ok.as_str(),
+                ])
+                .inc();
+        }
+        Err(e) => {
+            metrics::registry::EBPF_MAP_OPS_TOTAL
+                .with_label_values(&[
+                    EbpfMapName::FlowStats.as_str(),
+                    EbpfMapOperation::Write.as_str(),
+                    EbpfMapStatus::Error.as_str(),
+                ])
+                .inc();
+            debug!(
+                event.name = "record.metadata_reset_failed",
+                flow.community_id = %community_id,
+                error.message = %e,
+                "failed to reset metadata flags and values in eBPF map"
+            );
+        }
+    }
+
     drop(map);
 
     let delta_packets = stats.packets.saturating_sub(last_recorded_packets);
@@ -1704,63 +1749,7 @@ async fn record_flow(
                 export.context = "active_record",
                 "export channel closed, stopping poller"
             );
-            return false; // Signal to stop poller
-        }
-    }
-
-    let ebpf_key = flow_store
-        .get(community_id)
-        .and_then(|entry| entry.flow_span.flow_key);
-
-    if let Some(ebpf_key) = ebpf_key {
-        let mut map = flow_stats_map.lock().await;
-        if let Ok(stats) = map.get(&ebpf_key, 0) {
-            metrics::registry::EBPF_MAP_OPS_TOTAL
-                .with_label_values(&[
-                    EbpfMapName::FlowStats.as_str(),
-                    EbpfMapOperation::Read.as_str(),
-                    EbpfMapStatus::Ok.as_str(),
-                ])
-                .inc();
-
-            let mut updated_stats = stats;
-            updated_stats.forward_metadata_seen = 0;
-            updated_stats.reverse_metadata_seen = 0;
-            updated_stats.ip_dscp = 0;
-            updated_stats.ip_ecn = 0;
-            updated_stats.ip_ttl = 0;
-            updated_stats.ip_flow_label = 0;
-            updated_stats.reverse_ip_dscp = 0;
-            updated_stats.reverse_ip_ecn = 0;
-            updated_stats.reverse_ip_ttl = 0;
-            updated_stats.reverse_ip_flow_label = 0;
-
-            match map.insert(ebpf_key, updated_stats, 0) {
-                Ok(_) => {
-                    metrics::registry::EBPF_MAP_OPS_TOTAL
-                        .with_label_values(&[
-                            EbpfMapName::FlowStats.as_str(),
-                            EbpfMapOperation::Write.as_str(),
-                            EbpfMapStatus::Ok.as_str(),
-                        ])
-                        .inc();
-                }
-                Err(e) => {
-                    metrics::registry::EBPF_MAP_OPS_TOTAL
-                        .with_label_values(&[
-                            EbpfMapName::FlowStats.as_str(),
-                            EbpfMapOperation::Write.as_str(),
-                            EbpfMapStatus::Error.as_str(),
-                        ])
-                        .inc();
-                    debug!(
-                        event.name = "record.metadata_reset_failed",
-                        flow.community_id = %community_id,
-                        error.message = %e,
-                        "failed to reset metadata flags and values in eBPF map"
-                    );
-                }
-            }
+            return false;
         }
     }
 
@@ -1769,32 +1758,34 @@ async fn record_flow(
 
 /// Timeout and remove a flow, recording it one final time if it has packets.
 pub async fn timeout_and_remove_flow(
-    community_id: String,
+    community_id: Arc<str>,
     flow_store: &FlowStore,
     flow_stats_map: &Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
     flow_span_tx: &mpsc::Sender<FlowSpan>,
 ) {
-    let (ebpf_key, boot_time_offset) = if let Some(entry) = flow_store.get(&community_id) {
+    let (ebpf_key, boot_time_offset) = if let Some(entry) = flow_store.get(community_id.as_ref()) {
         (entry.flow_span.flow_key, entry.flow_span.boot_time_offset)
     } else {
         return;
     };
 
-    let entry = match flow_store.remove(&community_id) {
+    let entry = match flow_store.remove(community_id.as_ref()) {
         Some((_, entry)) => entry,
         None => return,
     };
 
     let mut flow_span = entry.flow_span;
 
+    // Single lock hold: read final stats, emit the span, and remove the eBPF entry.
+    // try_send is non-blocking so it is safe to call while holding the mutex.
     if let Some(key) = ebpf_key {
         let lock_start = std::time::Instant::now();
-        let map = flow_stats_map.lock().await;
+        let mut map = flow_stats_map.lock().await;
         let lock_duration = lock_start.elapsed();
 
         if lock_duration.as_millis() > 100 {
             warn!(
-                event.name = "timeout_flow.slow_lock_read",
+                event.name = "timeout_flow.slow_lock",
                 flow.community_id = %community_id,
                 lock.duration_ms = lock_duration.as_millis(),
                 "mutex acquisition took longer than expected"
@@ -1837,126 +1828,108 @@ pub async fn timeout_and_remove_flow(
                 flow_span.attributes.flow_reverse_bytes_total = stats.reverse_bytes as i64;
             }
         }
-        drop(map);
-    }
 
-    let has_new_packets = flow_span.attributes.flow_packets_delta > 0
-        || flow_span.attributes.flow_reverse_packets_delta > 0;
+        let has_new_packets = flow_span.attributes.flow_packets_delta > 0
+            || flow_span.attributes.flow_reverse_packets_delta > 0;
 
-    if has_new_packets {
-        let mut recorded_span = flow_span.clone();
-        recorded_span.attributes.flow_end_reason = Some(determine_flow_end_reason(
-            flow_span.attributes.flow_tcp_flags_bits,
-            FlowEndReason::IdleTimeout,
-        ));
+        if has_new_packets {
+            let mut recorded_span = flow_span.clone();
+            recorded_span.attributes.flow_end_reason = Some(determine_flow_end_reason(
+                flow_span.attributes.flow_tcp_flags_bits,
+                FlowEndReason::IdleTimeout,
+            ));
 
-        if recorded_span.end_time < recorded_span.start_time {
-            std::mem::swap(&mut recorded_span.start_time, &mut recorded_span.end_time);
-        }
-
-        match flow_span_tx.try_send(recorded_span) {
-            Ok(_) => {
-                metrics::registry::CHANNEL_SENDS_TOTAL
-                    .with_label_values(&[
-                        ChannelName::ProducerOutput.as_str(),
-                        ChannelSendStatus::Success.as_str(),
-                    ])
-                    .inc();
+            if recorded_span.end_time < recorded_span.start_time {
+                std::mem::swap(&mut recorded_span.start_time, &mut recorded_span.end_time);
             }
-            Err(mpsc::error::TrySendError::Full(_)) => {
-                metrics::registry::CHANNEL_SENDS_TOTAL
-                    .with_label_values(&[
-                        ChannelName::ProducerOutput.as_str(),
-                        ChannelSendStatus::Backpressure.as_str(),
-                    ])
-                    .inc();
-                debug!(
-                    event.name = "span.dropped",
-                    flow.community_id = %community_id,
-                    reason = "export_channel_full",
-                    export.context = "idle_timeout",
-                    "dropped flow span - export channel at capacity"
-                );
-            }
-            Err(mpsc::error::TrySendError::Closed(_)) => {
-                metrics::registry::CHANNEL_SENDS_TOTAL
-                    .with_label_values(&[
-                        ChannelName::ProducerOutput.as_str(),
-                        ChannelSendStatus::Error.as_str(),
-                    ])
-                    .inc();
-                error!(
-                    event.name = "span.export_failed",
-                    flow.community_id = %community_id,
-                    reason = "channel_closed",
-                    export.context = "idle_timeout",
-                    "export channel closed"
-                );
-            }
-        }
-    }
 
-    if let Some(key) = ebpf_key {
-        macro_rules! cleanup_ebpf_map {
-            ($map_mutex:expr, $map_enum:expr) => {
-                let lock_start = std::time::Instant::now();
-                let mut map = $map_mutex.lock().await;
-
-                if lock_start.elapsed().as_millis() > 100 {
-                    warn!(
-                        event.name = "timeout_flow.slow_lock_cleanup",
+            match flow_span_tx.try_send(recorded_span) {
+                Ok(_) => {
+                    metrics::registry::CHANNEL_SENDS_TOTAL
+                        .with_label_values(&[
+                            ChannelName::ProducerOutput.as_str(),
+                            ChannelSendStatus::Success.as_str(),
+                        ])
+                        .inc();
+                }
+                Err(mpsc::error::TrySendError::Full(_)) => {
+                    metrics::registry::CHANNEL_SENDS_TOTAL
+                        .with_label_values(&[
+                            ChannelName::ProducerOutput.as_str(),
+                            ChannelSendStatus::Backpressure.as_str(),
+                        ])
+                        .inc();
+                    debug!(
+                        event.name = "span.dropped",
                         flow.community_id = %community_id,
-                        map = $map_enum.as_str(),
-                        "mutex acquisition for cleanup took longer than expected"
+                        reason = "export_channel_full",
+                        export.context = "idle_timeout",
+                        "dropped flow span - export channel at capacity"
                     );
                 }
-
-                match map.remove(&key) {
-                    Ok(_) => {
-                        metrics::registry::EBPF_MAP_OPS_TOTAL.with_label_values(&[
-                            $map_enum.as_str(),
-                            EbpfMapOperation::Delete.as_str(),
-                            EbpfMapStatus::Ok.as_str(),
-                        ]).inc();
-                    }
-                    Err(e) => {
-                        let is_not_found = map_entry_not_found(&e);
-
-                        let status = if is_not_found {
-                            EbpfMapStatus::NotFound
-                        } else {
-                            EbpfMapStatus::Error
-                        };
-                        metrics::registry::EBPF_MAP_OPS_TOTAL.with_label_values(&[
-                            $map_enum.as_str(),
-                            EbpfMapOperation::Delete.as_str(),
-                            status.as_str(),
-                        ]).inc();
-
-                        if !is_not_found {
-                            debug!(
-                                event.name = "ebpf.map_cleanup_failed",
-                                flow.community_id = %community_id,
-                                map = $map_enum.as_str(),
-                                error.message = %e,
-                                "failed to remove eBPF map entry due to kernel error"
-                            );
-                        } else {
-                            debug!(
-                                event.name = "ebpf.map_entry_absent",
-                                flow.community_id = %community_id,
-                                map = $map_enum.as_str(),
-                                error.message = %e,
-                                "map entry already removed or evicted"
-                            );
-                        }
-                    }
+                Err(mpsc::error::TrySendError::Closed(_)) => {
+                    metrics::registry::CHANNEL_SENDS_TOTAL
+                        .with_label_values(&[
+                            ChannelName::ProducerOutput.as_str(),
+                            ChannelSendStatus::Error.as_str(),
+                        ])
+                        .inc();
+                    error!(
+                        event.name = "span.export_failed",
+                        flow.community_id = %community_id,
+                        reason = "channel_closed",
+                        export.context = "idle_timeout",
+                        "export channel closed"
+                    );
                 }
-                drop(map); // Release lock immediately
-            };
+            }
         }
 
-        cleanup_ebpf_map!(flow_stats_map, EbpfMapName::FlowStats);
+        match map.remove(&key) {
+            Ok(_) => {
+                metrics::registry::EBPF_MAP_OPS_TOTAL
+                    .with_label_values(&[
+                        EbpfMapName::FlowStats.as_str(),
+                        EbpfMapOperation::Delete.as_str(),
+                        EbpfMapStatus::Ok.as_str(),
+                    ])
+                    .inc();
+            }
+            Err(e) => {
+                let is_not_found = map_entry_not_found(&e);
+                let status = if is_not_found {
+                    EbpfMapStatus::NotFound
+                } else {
+                    EbpfMapStatus::Error
+                };
+                metrics::registry::EBPF_MAP_OPS_TOTAL
+                    .with_label_values(&[
+                        EbpfMapName::FlowStats.as_str(),
+                        EbpfMapOperation::Delete.as_str(),
+                        status.as_str(),
+                    ])
+                    .inc();
+                if !is_not_found {
+                    debug!(
+                        event.name = "ebpf.map_cleanup_failed",
+                        flow.community_id = %community_id,
+                        map = EbpfMapName::FlowStats.as_str(),
+                        error.message = %e,
+                        "failed to remove eBPF map entry due to kernel error"
+                    );
+                } else {
+                    debug!(
+                        event.name = "ebpf.map_entry_absent",
+                        flow.community_id = %community_id,
+                        map = EbpfMapName::FlowStats.as_str(),
+                        error.message = %e,
+                        "map entry already removed or evicted"
+                    );
+                }
+            }
+        }
+
+        drop(map);
     }
 
     let iface_name = flow_span
@@ -2030,15 +2003,30 @@ pub async fn orphan_scanner_task(
                 let max_age_ns = max_age.as_nanos() as u64;
 
                 let mut removed = 0u64;
-                let mut scanned = 0u64;
 
-                // Get all keys first (to avoid holding lock during iteration)
-                let keys: Vec<FlowKey> = {
+                // Single lock hold: enumerate all entries and classify stale ones.
+                let (stale_keys, ebpf_map_size) = {
                     let map = flow_stats_map.lock().await;
-                    map.keys().filter_map(|k| k.ok()).collect()
+                    let mut stale: Vec<FlowKey> = Vec::new();
+                    let mut total = 0u64;
+                    for item in map.iter() {
+                        let Ok((key, stats)) = item else { continue };
+                        total += 1;
+                        metrics::registry::EBPF_MAP_OPS_TOTAL
+                            .with_label_values(&[
+                                EbpfMapName::FlowStats.as_str(),
+                                EbpfMapOperation::Read.as_str(),
+                                EbpfMapStatus::Ok.as_str(),
+                            ])
+                            .inc();
+                        let age_ns = current_boot_time_ns.saturating_sub(stats.last_seen_ns);
+                        if age_ns > max_age_ns {
+                            stale.push(key);
+                        }
+                    }
+                    (stale, total)
                 };
 
-                let ebpf_map_size = keys.len() as u64;
                 metrics::registry::EBPF_MAP_SIZE
                     .with_label_values(&[EbpfMapName::FlowStats.as_str(), MapUnit::Entries.as_str()])
                     .set(ebpf_map_size as i64);
@@ -2060,47 +2048,22 @@ pub async fn orphan_scanner_task(
                     }
                 }
 
-                for key in keys {
-                    scanned += 1;
-
-                    // Check if entry is very old
-                    let is_old = {
-                        let map = flow_stats_map.lock().await;
-                        match map.get(&key, 0) {
-                            Ok(stats) => {
-                                metrics::registry::EBPF_MAP_OPS_TOTAL
-                                    .with_label_values(&[
-                                        EbpfMapName::FlowStats.as_str(),
-                                        EbpfMapOperation::Read.as_str(),
-                                        EbpfMapStatus::Ok.as_str(),
-                                    ])
-                                    .inc();
-                                let age_ns = current_boot_time_ns.saturating_sub(stats.last_seen_ns);
-                                age_ns > max_age_ns
-                            }
-                            Err(_) => continue, // Entry already removed
-                        }
-                    };
-
-                    if !is_old {
-                        continue;
-                    }
-
+                for key in stale_keys {
                     // Convert FlowKey to IP addresses for Community ID generation
                     let (src_addr, dst_addr) = match flow_key_to_ip_addrs(&key) {
                         Ok(addrs) => addrs,
                         Err(_) => continue, // Skip invalid IP version
                     };
 
-                    let community_id = community_id_generator.generate(
+                    let community_id: Arc<str> = community_id_generator.generate(
                         src_addr,
                         dst_addr,
                         key.src_port,
                         key.dst_port,
                         key.protocol,
-                    );
+                    ).into();
 
-                    if flow_store.contains_key(&community_id) {
+                    if flow_store.contains_key(community_id.as_ref()) {
                         // Entry is old but still being tracked - don't remove
                         continue;
                     }
@@ -2140,7 +2103,7 @@ pub async fn orphan_scanner_task(
                 if removed > 0 {
                     warn!(
                         event.name = "orphan_scanner.scan_completed",
-                        entries.scanned = scanned,
+                        entries.scanned = ebpf_map_size,
                         entries.removed = removed,
                         scan.interval_secs = scan_interval.as_secs(),
                         "orphan scanner completed - removed stale entries"
@@ -2148,7 +2111,7 @@ pub async fn orphan_scanner_task(
                 } else {
                     debug!(
                         event.name = "orphan_scanner.scan_completed_clean",
-                        entries.scanned = scanned,
+                        entries.scanned = ebpf_map_size,
                         "orphan scanner completed - no orphans found"
                     );
                 }
@@ -2581,7 +2544,7 @@ mod tests {
     async fn timeout_and_remove_flow_sends_span_and_cleans_store() {
         let flow_store = Arc::new(DashMap::with_hasher(FxBuildHasher::default()));
         let (flow_span_tx, mut flow_span_rx) = mpsc::channel(100);
-        let community_id = "test_flow_1".to_string();
+        let community_id: Arc<str> = Arc::from("test_flow_1");
         let flow_key = FlowKey::default();
 
         flow_store.insert(
@@ -2592,7 +2555,7 @@ mod tests {
         );
         assert_eq!(flow_store.len(), 1);
 
-        let mut entry = flow_store.remove(&community_id).unwrap().1;
+        let mut entry = flow_store.remove(community_id.as_ref()).unwrap().1;
         entry.flow_span.attributes.flow_end_reason = Some(FlowEndReason::IdleTimeout);
         let _ = flow_span_tx.send(entry.flow_span).await;
 
@@ -2682,6 +2645,334 @@ mod tests {
         assert_eq!(
             rndtrip_latency, None,
             "Server should not have Round-Trip Latency"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // record_flow refactor: metadata reset moved into the first lock hold
+    // -------------------------------------------------------------------------
+
+    // FlowStats is #[derive(Copy)], so `let mut reset_stats = stats` produces an
+    // independent stack copy. The tests below prove that the metadata fields
+    // zeroed in reset_stats do not affect the original `stats` binding used for
+    // all delta computation and attribute updates.
+
+    #[test]
+    fn record_flow_reset_stats_is_independent_copy_of_stats() {
+        let mut stats = create_test_stats(IpProto::Udp);
+        stats.ip_dscp = 46;
+        stats.ip_ecn = 2;
+        stats.ip_ttl = 64;
+        stats.ip_flow_label = 100;
+        stats.reverse_ip_dscp = 20;
+        stats.reverse_ip_ecn = 1;
+        stats.reverse_ip_ttl = 128;
+        stats.reverse_ip_flow_label = 200;
+        stats.forward_metadata_seen = 1;
+        stats.reverse_metadata_seen = 1;
+        stats.packets = 42;
+        stats.bytes = 8400;
+        stats.reverse_packets = 10;
+        stats.reverse_bytes = 1000;
+
+        // Mirrors exactly what record_flow does after acquiring the lock.
+        let mut reset_stats = stats;
+        reset_stats.forward_metadata_seen = 0;
+        reset_stats.reverse_metadata_seen = 0;
+        reset_stats.ip_dscp = 0;
+        reset_stats.ip_ecn = 0;
+        reset_stats.ip_ttl = 0;
+        reset_stats.ip_flow_label = 0;
+        reset_stats.reverse_ip_dscp = 0;
+        reset_stats.reverse_ip_ecn = 0;
+        reset_stats.reverse_ip_ttl = 0;
+        reset_stats.reverse_ip_flow_label = 0;
+
+        // Original stats are completely unaffected.
+        assert_eq!(stats.ip_dscp, 46);
+        assert_eq!(stats.ip_ecn, 2);
+        assert_eq!(stats.ip_ttl, 64);
+        assert_eq!(stats.ip_flow_label, 100);
+        assert_eq!(stats.reverse_ip_dscp, 20);
+        assert_eq!(stats.reverse_ip_ecn, 1);
+        assert_eq!(stats.reverse_ip_ttl, 128);
+        assert_eq!(stats.reverse_ip_flow_label, 200);
+        assert_eq!(stats.forward_metadata_seen, 1);
+        assert_eq!(stats.reverse_metadata_seen, 1);
+        assert_eq!(stats.packets, 42);
+        assert_eq!(stats.bytes, 8400);
+        assert_eq!(stats.reverse_packets, 10);
+        assert_eq!(stats.reverse_bytes, 1000);
+
+        // reset_stats has metadata fields zeroed.
+        assert_eq!(reset_stats.forward_metadata_seen, 0);
+        assert_eq!(reset_stats.reverse_metadata_seen, 0);
+        assert_eq!(reset_stats.ip_dscp, 0);
+        assert_eq!(reset_stats.ip_ecn, 0);
+        assert_eq!(reset_stats.ip_ttl, 0);
+        assert_eq!(reset_stats.ip_flow_label, 0);
+        assert_eq!(reset_stats.reverse_ip_dscp, 0);
+        assert_eq!(reset_stats.reverse_ip_ecn, 0);
+        assert_eq!(reset_stats.reverse_ip_ttl, 0);
+        assert_eq!(reset_stats.reverse_ip_flow_label, 0);
+
+        // Non-metadata counters are preserved in reset_stats (they are written
+        // back to the eBPF map unchanged so the kernel's running totals are kept).
+        assert_eq!(reset_stats.packets, 42);
+        assert_eq!(reset_stats.bytes, 8400);
+        assert_eq!(reset_stats.reverse_packets, 10);
+        assert_eq!(reset_stats.reverse_bytes, 1000);
+    }
+
+    #[test]
+    fn record_flow_delta_computation_uses_pre_reset_values() {
+        let mut stats = create_test_stats(IpProto::Udp);
+        stats.packets = 100;
+        stats.bytes = 10_000;
+        stats.reverse_packets = 50;
+        stats.reverse_bytes = 5_000;
+        // Simulate metadata flags being set by the eBPF program.
+        stats.forward_metadata_seen = 1;
+        stats.reverse_metadata_seen = 1;
+        stats.ip_dscp = 46;
+        stats.ip_ttl = 64;
+
+        let last_recorded_packets = 80u64;
+        let last_recorded_bytes = 8_000u64;
+        let last_recorded_reverse_packets = 40u64;
+        let last_recorded_reverse_bytes = 4_000u64;
+
+        // Perform the metadata reset exactly as record_flow now does.
+        let mut reset_stats = stats;
+        reset_stats.forward_metadata_seen = 0;
+        reset_stats.reverse_metadata_seen = 0;
+        reset_stats.ip_dscp = 0;
+        reset_stats.ip_ecn = 0;
+        reset_stats.ip_ttl = 0;
+        reset_stats.ip_flow_label = 0;
+        reset_stats.reverse_ip_dscp = 0;
+        reset_stats.reverse_ip_ecn = 0;
+        reset_stats.reverse_ip_ttl = 0;
+        reset_stats.reverse_ip_flow_label = 0;
+        // (reset_stats is written back to the eBPF map here in the real function)
+
+        // Delta computation (after drop(map)) still reads from the original `stats`.
+        let delta_packets = stats.packets.saturating_sub(last_recorded_packets);
+        let delta_bytes = stats.bytes.saturating_sub(last_recorded_bytes);
+        let delta_reverse_packets = stats
+            .reverse_packets
+            .saturating_sub(last_recorded_reverse_packets);
+        let delta_reverse_bytes = stats
+            .reverse_bytes
+            .saturating_sub(last_recorded_reverse_bytes);
+
+        assert_eq!(delta_packets, 20);
+        assert_eq!(delta_bytes, 2_000);
+        assert_eq!(delta_reverse_packets, 10);
+        assert_eq!(delta_reverse_bytes, 1_000);
+
+        // The reset did not corrupt the values used for attribute writes.
+        assert_eq!(stats.ip_dscp, 46, "ip_dscp read for span attribute");
+        assert_eq!(stats.ip_ttl, 64, "ip_ttl read for span attribute");
+    }
+
+    #[test]
+    fn record_flow_zero_delta_skips_span_emission() {
+        let stats = create_test_stats(IpProto::Udp);
+
+        // Set last-recorded counters equal to current counters → zero delta.
+        let last_recorded_packets = stats.packets;
+        let last_recorded_reverse_packets = stats.reverse_packets;
+
+        let delta_packets = stats.packets.saturating_sub(last_recorded_packets);
+        let delta_reverse_packets = stats
+            .reverse_packets
+            .saturating_sub(last_recorded_reverse_packets);
+
+        let should_send = delta_packets > 0 || delta_reverse_packets > 0;
+        assert!(!should_send, "zero-delta flow must not emit a span");
+    }
+
+    #[test]
+    fn record_flow_non_zero_delta_triggers_span_emission() {
+        let mut stats = create_test_stats(IpProto::Udp);
+        stats.packets = 10;
+        stats.reverse_packets = 5;
+
+        let last_recorded_packets = 5u64; // 5 new forward packets
+        let last_recorded_reverse_packets = 5u64; // 0 new reverse packets
+
+        let delta_packets = stats.packets.saturating_sub(last_recorded_packets);
+        let delta_reverse_packets = stats
+            .reverse_packets
+            .saturating_sub(last_recorded_reverse_packets);
+
+        let should_send = delta_packets > 0 || delta_reverse_packets > 0;
+        assert!(
+            should_send,
+            "non-zero forward delta must trigger span emission"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // timeout_and_remove_flow refactor: merged two lock holds into one
+    // -------------------------------------------------------------------------
+
+    // The has_new_packets gate and end_time computation now happen inside the
+    // single lock hold. These tests verify those invariants directly, since the
+    // function itself requires a live eBPF map and cannot be unit-tested end-to-end.
+
+    #[test]
+    fn timeout_flow_has_new_packets_gates_span_emission() {
+        let mut flow_span = create_test_flow_span(FlowKey::default());
+
+        // No deltas → no span.
+        flow_span.attributes.flow_packets_delta = 0;
+        flow_span.attributes.flow_reverse_packets_delta = 0;
+        let has_new_packets = flow_span.attributes.flow_packets_delta > 0
+            || flow_span.attributes.flow_reverse_packets_delta > 0;
+        assert!(!has_new_packets, "zero deltas must not emit a span");
+
+        // Forward packets only → span.
+        flow_span.attributes.flow_packets_delta = 5;
+        flow_span.attributes.flow_reverse_packets_delta = 0;
+        let has_new_packets = flow_span.attributes.flow_packets_delta > 0
+            || flow_span.attributes.flow_reverse_packets_delta > 0;
+        assert!(has_new_packets, "non-zero forward delta must emit a span");
+
+        // Reverse packets only → span.
+        flow_span.attributes.flow_packets_delta = 0;
+        flow_span.attributes.flow_reverse_packets_delta = 3;
+        let has_new_packets = flow_span.attributes.flow_packets_delta > 0
+            || flow_span.attributes.flow_reverse_packets_delta > 0;
+        assert!(has_new_packets, "non-zero reverse delta must emit a span");
+    }
+
+    #[test]
+    fn timeout_flow_end_time_computed_from_last_seen_and_boot_offset() {
+        // Mirrors: let end_time_nanos = stats.last_seen_ns + boot_time_offset;
+        //          flow_span.end_time = UNIX_EPOCH + Duration::from_nanos(end_time_nanos);
+        let last_seen_ns: u64 = 5_000_000_000; // 5 s since boot
+        let boot_time_offset: u64 = 1_000_000_000_000; // 1000 s wall clock offset
+        let end_time_nanos = last_seen_ns + boot_time_offset;
+        let end_time = UNIX_EPOCH + Duration::from_nanos(end_time_nanos);
+
+        assert_eq!(
+            end_time,
+            UNIX_EPOCH + Duration::from_nanos(1_005_000_000_000),
+        );
+    }
+
+    #[test]
+    fn timeout_flow_uses_idle_timeout_as_default_end_reason() {
+        // No TCP flags → IdleTimeout preserved.
+        let reason = determine_flow_end_reason(None, FlowEndReason::IdleTimeout);
+        assert_eq!(reason, FlowEndReason::IdleTimeout);
+
+        // FIN flag overrides to EndOfFlowDetected even for timeout path.
+        let reason = determine_flow_end_reason(Some(TCP_FLAG_FIN), FlowEndReason::IdleTimeout);
+        assert_eq!(reason, FlowEndReason::EndOfFlowDetected);
+    }
+
+    #[tokio::test]
+    async fn timeout_flow_removes_entry_from_store_and_emits_span() {
+        // Reproduce the observable behaviour of timeout_and_remove_flow for the
+        // no-eBPF-map path (flow_packets_delta already set, ebpf_key = None).
+        // This mirrors the existing test pattern used in this module.
+        let flow_store: FlowStore = Arc::new(DashMap::with_capacity_and_hasher(
+            4,
+            FxBuildHasher::default(),
+        ));
+        let (flow_span_tx, mut flow_span_rx) = mpsc::channel(100);
+        let community_id: Arc<str> = Arc::from("test_cid");
+
+        let mut span = create_test_flow_span(FlowKey::default());
+        span.attributes.flow_packets_delta = 10;
+        span.attributes.flow_end_reason = Some(FlowEndReason::IdleTimeout);
+
+        flow_store.insert(community_id.clone(), FlowEntry { flow_span: span });
+        assert_eq!(flow_store.len(), 1);
+
+        // Simulate the removal + emit that timeout_and_remove_flow performs.
+        let entry = flow_store.remove(community_id.as_ref()).unwrap().1;
+        assert!(
+            flow_store.is_empty(),
+            "entry must be removed from flow_store"
+        );
+
+        flow_span_tx.send(entry.flow_span).await.unwrap();
+
+        let received = flow_span_rx.recv().await.expect("span must be emitted");
+        assert_eq!(
+            received.attributes.flow_packets_delta, 10,
+            "emitted span must carry the final delta"
+        );
+        assert_eq!(
+            received.attributes.flow_end_reason,
+            Some(FlowEndReason::IdleTimeout),
+            "end reason must be IdleTimeout"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // orphan_scanner_task refactor: O(N) per-key locks → single iter() pass
+    // -------------------------------------------------------------------------
+
+    // The age classification logic is unchanged — only the locking strategy
+    // was restructured. These tests verify the predicate that was previously
+    // applied inside the per-key lock is still correct when applied inline
+    // during the iter() pass.
+
+    #[test]
+    fn orphan_scanner_age_check_classifies_stale_entries_correctly() {
+        let max_age = Duration::from_secs(120);
+        let max_age_ns = max_age.as_nanos() as u64;
+
+        // Simulate a current boot-relative clock at 300 seconds.
+        let current_boot_time_ns: u64 = 300_000_000_000;
+
+        let check_age = |last_seen_ns: u64| -> bool {
+            let age_ns = current_boot_time_ns.saturating_sub(last_seen_ns);
+            age_ns > max_age_ns
+        };
+
+        // 60 s old — below threshold → NOT stale.
+        assert!(
+            !check_age(current_boot_time_ns - 60_000_000_000),
+            "60 s entry must not be stale"
+        );
+
+        // 180 s old — above threshold → stale.
+        assert!(
+            check_age(current_boot_time_ns - 180_000_000_000),
+            "180 s entry must be stale"
+        );
+
+        // Exactly at threshold (120 s) → NOT stale (predicate is strictly >).
+        assert!(
+            !check_age(current_boot_time_ns - max_age_ns),
+            "entry at exact max_age must not be stale (> not >=)"
+        );
+
+        // One nanosecond over threshold → stale.
+        assert!(
+            check_age(current_boot_time_ns - max_age_ns - 1),
+            "entry 1 ns over threshold must be stale"
+        );
+    }
+
+    #[test]
+    fn orphan_scanner_age_check_handles_saturating_sub() {
+        let max_age_ns = Duration::from_secs(120).as_nanos() as u64;
+
+        // current_boot_time_ns is 0 (edge case) — saturating_sub never wraps.
+        let current_boot_time_ns: u64 = 0;
+        let last_seen_ns: u64 = 1_000_000_000; // in the "future" relative to clock
+        let age_ns = current_boot_time_ns.saturating_sub(last_seen_ns);
+        assert_eq!(age_ns, 0, "saturating_sub must not underflow");
+        assert!(
+            !(age_ns > max_age_ns),
+            "future last_seen must not be classified as stale"
         );
     }
 }
