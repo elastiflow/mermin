@@ -746,7 +746,7 @@ impl Traceable for FlowSpan {
         }
         flatten_annotations!(
             "source.k8s.deployment.annotations",
-            self.attributes.source_k8s_service_annotations
+            self.attributes.source_k8s_deployment_annotations
         );
         if let Some(ref value) = self.attributes.source_k8s_deployment_name {
             kvs.push(KeyValue::new(
@@ -759,7 +759,7 @@ impl Traceable for FlowSpan {
         }
         flatten_annotations!(
             "source.k8s.replicaset.annotations",
-            self.attributes.source_k8s_service_annotations
+            self.attributes.source_k8s_replicaset_annotations
         );
         if let Some(ref value) = self.attributes.source_k8s_replicaset_name {
             kvs.push(KeyValue::new(
@@ -772,7 +772,7 @@ impl Traceable for FlowSpan {
         }
         flatten_annotations!(
             "source.k8s.statefulset.annotations",
-            self.attributes.source_k8s_service_annotations
+            self.attributes.source_k8s_statefulset_annotations
         );
         if let Some(ref value) = self.attributes.source_k8s_statefulset_name {
             kvs.push(KeyValue::new(
@@ -788,7 +788,7 @@ impl Traceable for FlowSpan {
         }
         flatten_annotations!(
             "source.k8s.daemonset.annotations",
-            self.attributes.source_k8s_service_annotations
+            self.attributes.source_k8s_daemonset_annotations
         );
         if let Some(ref value) = self.attributes.source_k8s_daemonset_name {
             kvs.push(KeyValue::new("source.k8s.daemonset.name", value.to_owned()));
@@ -798,7 +798,7 @@ impl Traceable for FlowSpan {
         }
         flatten_annotations!(
             "source.k8s.job.annotations",
-            self.attributes.source_k8s_service_annotations
+            self.attributes.source_k8s_job_annotations
         );
         if let Some(ref value) = self.attributes.source_k8s_job_name {
             kvs.push(KeyValue::new("source.k8s.job.name", value.to_owned()));
@@ -808,7 +808,7 @@ impl Traceable for FlowSpan {
         }
         flatten_annotations!(
             "source.k8s.cronjob.annotations",
-            self.attributes.source_k8s_service_annotations
+            self.attributes.source_k8s_cronjob_annotations
         );
         if let Some(ref value) = self.attributes.source_k8s_cronjob_name {
             kvs.push(KeyValue::new("source.k8s.cronjob.name", value.to_owned()));
@@ -840,7 +840,7 @@ impl Traceable for FlowSpan {
         }
         flatten_annotations!(
             "destination.k8s.node.annotations",
-            self.attributes.destination_k8s_pod_annotations
+            self.attributes.destination_k8s_node_annotations
         );
         if let Some(ref value) = self.attributes.destination_k8s_node_name {
             kvs.push(KeyValue::new("destination.k8s.node.name", value.to_owned()));
@@ -872,7 +872,7 @@ impl Traceable for FlowSpan {
         }
         flatten_annotations!(
             "destination.k8s.deployment.annotations",
-            self.attributes.destination_k8s_pod_annotations
+            self.attributes.destination_k8s_deployment_annotations
         );
         if let Some(ref value) = self.attributes.destination_k8s_deployment_name {
             kvs.push(KeyValue::new(
@@ -888,7 +888,7 @@ impl Traceable for FlowSpan {
         }
         flatten_annotations!(
             "destination.k8s.replicaset.annotations",
-            self.attributes.destination_k8s_pod_annotations
+            self.attributes.destination_k8s_replicaset_annotations
         );
         if let Some(ref value) = self.attributes.destination_k8s_replicaset_name {
             kvs.push(KeyValue::new(
@@ -904,7 +904,7 @@ impl Traceable for FlowSpan {
         }
         flatten_annotations!(
             "destination.k8s.statefulset.annotations",
-            self.attributes.destination_k8s_pod_annotations
+            self.attributes.destination_k8s_statefulset_annotations
         );
         if let Some(ref value) = self.attributes.destination_k8s_statefulset_name {
             kvs.push(KeyValue::new(
@@ -920,7 +920,7 @@ impl Traceable for FlowSpan {
         }
         flatten_annotations!(
             "destination.k8s.daemonset.annotations",
-            self.attributes.destination_k8s_pod_annotations
+            self.attributes.destination_k8s_daemonset_annotations
         );
         if let Some(ref value) = self.attributes.destination_k8s_daemonset_name {
             kvs.push(KeyValue::new(
@@ -936,7 +936,7 @@ impl Traceable for FlowSpan {
         }
         flatten_annotations!(
             "destination.k8s.job.annotations",
-            self.attributes.destination_k8s_pod_annotations
+            self.attributes.destination_k8s_job_annotations
         );
         if let Some(ref value) = self.attributes.destination_k8s_job_name {
             kvs.push(KeyValue::new("destination.k8s.job.name", value.to_owned()));
@@ -946,7 +946,7 @@ impl Traceable for FlowSpan {
         }
         flatten_annotations!(
             "destination.k8s.cronjob.annotations",
-            self.attributes.destination_k8s_pod_annotations
+            self.attributes.destination_k8s_cronjob_annotations
         );
         if let Some(ref value) = self.attributes.destination_k8s_cronjob_name {
             kvs.push(KeyValue::new(
@@ -962,7 +962,7 @@ impl Traceable for FlowSpan {
         }
         flatten_annotations!(
             "destination.k8s.service.annotations",
-            self.attributes.destination_k8s_pod_annotations
+            self.attributes.destination_k8s_service_annotations
         );
         if let Some(ref value) = self.attributes.destination_k8s_service_name {
             kvs.push(KeyValue::new(
