@@ -47,49 +47,60 @@ impl<'a> Decorator<'a> {
         }
     }
 
-    /// Decorate a flow span with K8s metadata, with automatic fallback to undecorated span on error.
+    /// Decorate a flow span with K8s metadata, with automatic fallback on error.
     ///
     /// This is the primary method for the K8s decorator pipeline. It ensures that spans are
-    /// NEVER dropped - if decoration fails for any reason, the original undecorated span is returned.
+    /// NEVER dropped - if decoration fails for any reason, the span is returned as-is. The
+    /// returned span may be partially decorated: if src/dst K8s attribute lookups succeeded
+    /// before the failure, those fields will be populated on the fallback span.
     pub async fn decorate_or_fallback(&self, flow_span: FlowSpan) -> (FlowSpan, Option<K8sError>) {
-        match self.decorate(&flow_span).await {
+        match self.decorate(flow_span).await {
             Ok(decorated_span) => (decorated_span, None),
-            Err(e) => (flow_span, Some(e)),
+            Err((e, original)) => (original, Some(e)),
         }
     }
 
     /// Correlates flow attributes with Kubernetes resources and populates K8s metadata fields.
-    /// Returns a cloned FlowSpan with source and destination Kubernetes attributes populated.
-    async fn decorate(&self, flow_span: &FlowSpan) -> Result<FlowSpan, K8sError> {
-        let ctx = FlowContext::from_flow_span(flow_span, self.attributor).await;
-        let mut decorated_flow = flow_span.clone();
+    ///
+    /// Takes ownership of `flow_span` so that K8s fields can be written via `attrs_mut()` without
+    /// cloning the inner `Arc<SpanAttributes>` (refcount is 1 on entry). On error the span is
+    /// returned inside the `Err` variant so the caller can fall back to the undecorated version.
+    async fn decorate(&self, mut flow_span: FlowSpan) -> Result<FlowSpan, (K8sError, FlowSpan)> {
+        let ctx = FlowContext::from_flow_span(&flow_span, self.attributor).await;
+
+        // Copy the port scalars (u16, Copy) before any mutable borrow of flow_span.
+        let src_port = flow_span.attributes.source_port;
+        let dst_port = flow_span.attributes.destination_port;
 
         let src_info = self.enrich(ctx.src_pod.as_ref(), ctx.src_ip).await;
         if let Some(info) = &src_info {
             self.populate_k8s_attributes(
-                &mut decorated_flow,
+                &mut flow_span,
                 info,
                 true,
                 ctx.src_pod.as_ref(),
-                flow_span.attributes.source_port,
+                src_port,
             );
         }
 
         let dst_info = self.enrich(ctx.dst_pod.as_ref(), ctx.dst_ip).await;
         if let Some(info) = &dst_info {
             self.populate_k8s_attributes(
-                &mut decorated_flow,
+                &mut flow_span,
                 info,
                 false,
                 ctx.dst_pod.as_ref(),
-                flow_span.attributes.destination_port,
+                dst_port,
             );
         }
 
-        let (ingress_policies, egress_policies) = self.evaluate_flow_policies(&ctx).await?;
-        self.populate_network_policies(&mut decorated_flow, &ingress_policies, &egress_policies);
+        let (ingress_policies, egress_policies) = match self.evaluate_flow_policies(&ctx).await {
+            Ok(policies) => policies,
+            Err(e) => return Err((e, flow_span)),
+        };
+        self.populate_network_policies(&mut flow_span, &ingress_policies, &egress_policies);
 
-        Ok(decorated_flow)
+        Ok(flow_span)
     }
 
     /// Resolves a pod and IP address to Kubernetes resource decoration information.
@@ -333,12 +344,14 @@ impl<'a> Decorator<'a> {
         value: &Option<String>,
         is_source: bool,
     ) {
+        let attrs = flow_span.attrs_mut();
+
         macro_rules! k8s_attr_mapping {
             ($(($attr:literal, $source_field:ident, $dest_field:ident)),* $(,)?) => {
                 match (is_source, attr_name) {
                     $(
-                        (true, $attr) => &mut flow_span.attributes.$source_field,
-                        (false, $attr) => &mut flow_span.attributes.$dest_field,
+                        (true, $attr) => &mut attrs.$source_field,
+                        (false, $attr) => &mut attrs.$dest_field,
                     )*
                     _ => return, // Unknown attribute - silently ignored for forward compatibility
                 }
@@ -371,68 +384,53 @@ impl<'a> Decorator<'a> {
         value: &Option<HashMap<String, String>>,
         is_source: bool,
     ) {
+        let attrs = flow_span.attrs_mut();
         match (is_source, attr_name) {
-            (true, "pod.annotations") => {
-                flow_span.attributes.source_k8s_pod_annotations = value.clone()
-            }
-            (false, "pod.annotations") => {
-                flow_span.attributes.destination_k8s_pod_annotations = value.clone()
-            }
+            (true, "pod.annotations") => attrs.source_k8s_pod_annotations = value.clone(),
+            (false, "pod.annotations") => attrs.destination_k8s_pod_annotations = value.clone(),
 
-            (true, "node.annotations") => {
-                flow_span.attributes.source_k8s_node_annotations = value.clone()
-            }
-            (false, "node.annotations") => {
-                flow_span.attributes.destination_k8s_node_annotations = value.clone()
-            }
+            (true, "node.annotations") => attrs.source_k8s_node_annotations = value.clone(),
+            (false, "node.annotations") => attrs.destination_k8s_node_annotations = value.clone(),
 
-            (true, "service.annotations") => {
-                flow_span.attributes.source_k8s_service_annotations = value.clone()
-            }
+            (true, "service.annotations") => attrs.source_k8s_service_annotations = value.clone(),
             (false, "service.annotations") => {
-                flow_span.attributes.destination_k8s_service_annotations = value.clone()
+                attrs.destination_k8s_service_annotations = value.clone()
             }
 
             (true, "deployment.annotations") => {
-                flow_span.attributes.source_k8s_deployment_annotations = value.clone()
+                attrs.source_k8s_deployment_annotations = value.clone()
             }
             (false, "deployment.annotations") => {
-                flow_span.attributes.destination_k8s_deployment_annotations = value.clone()
+                attrs.destination_k8s_deployment_annotations = value.clone()
             }
 
             (true, "daemonset.annotations") => {
-                flow_span.attributes.source_k8s_daemonset_annotations = value.clone()
+                attrs.source_k8s_daemonset_annotations = value.clone()
             }
             (false, "daemonset.annotations") => {
-                flow_span.attributes.destination_k8s_daemonset_annotations = value.clone()
+                attrs.destination_k8s_daemonset_annotations = value.clone()
             }
 
             (true, "replicaset.annotations") => {
-                flow_span.attributes.source_k8s_replicaset_annotations = value.clone()
+                attrs.source_k8s_replicaset_annotations = value.clone()
             }
             (false, "replicaset.annotations") => {
-                flow_span.attributes.destination_k8s_replicaset_annotations = value.clone()
+                attrs.destination_k8s_replicaset_annotations = value.clone()
             }
 
             (true, "statefulset.annotations") => {
-                flow_span.attributes.source_k8s_statefulset_annotations = value.clone()
+                attrs.source_k8s_statefulset_annotations = value.clone()
             }
             (false, "statefulset.annotations") => {
-                flow_span.attributes.destination_k8s_statefulset_annotations = value.clone()
+                attrs.destination_k8s_statefulset_annotations = value.clone()
             }
 
-            (true, "job.annotations") => {
-                flow_span.attributes.source_k8s_job_annotations = value.clone()
-            }
-            (false, "job.annotations") => {
-                flow_span.attributes.destination_k8s_job_annotations = value.clone()
-            }
+            (true, "job.annotations") => attrs.source_k8s_job_annotations = value.clone(),
+            (false, "job.annotations") => attrs.destination_k8s_job_annotations = value.clone(),
 
-            (true, "cronjob.annotations") => {
-                flow_span.attributes.source_k8s_cronjob_annotations = value.clone()
-            }
+            (true, "cronjob.annotations") => attrs.source_k8s_cronjob_annotations = value.clone(),
             (false, "cronjob.annotations") => {
-                flow_span.attributes.destination_k8s_cronjob_annotations = value.clone()
+                attrs.destination_k8s_cronjob_annotations = value.clone()
             }
             _ => {}
         }
@@ -444,33 +442,28 @@ impl<'a> Decorator<'a> {
         ingress_policies: &[NetworkPolicy],
         egress_policies: &[NetworkPolicy],
     ) {
-        if !ingress_policies.is_empty() {
-            let policy_names: Vec<String> = ingress_policies
-                .iter()
-                .map(|p| {
-                    if let Some(ns) = &p.policy.namespace {
-                        format!("{}/{}", ns, p.policy.name)
-                    } else {
-                        p.policy.name.clone()
-                    }
-                })
-                .collect();
-            flow_span.attributes.network_policies_ingress = Some(policy_names);
+        if ingress_policies.is_empty() && egress_policies.is_empty() {
+            return;
         }
 
-        if !egress_policies.is_empty() {
-            let policy_names: Vec<String> = egress_policies
-                .iter()
-                .map(|p| {
-                    if let Some(ns) = &p.policy.namespace {
-                        format!("{}/{}", ns, p.policy.name)
-                    } else {
-                        p.policy.name.clone()
-                    }
-                })
-                .collect();
-            flow_span.attributes.network_policies_egress = Some(policy_names);
-        }
+        let format_names = |policies: &[NetworkPolicy]| -> Option<Vec<String>> {
+            if policies.is_empty() {
+                return None;
+            }
+            Some(
+                policies
+                    .iter()
+                    .map(|p| match &p.policy.namespace {
+                        Some(ns) => format!("{}/{}", ns, p.policy.name),
+                        None => p.policy.name.clone(),
+                    })
+                    .collect(),
+            )
+        };
+
+        let attrs = flow_span.attrs_mut();
+        attrs.network_policies_ingress = format_names(ingress_policies);
+        attrs.network_policies_egress = format_names(egress_policies);
     }
 
     async fn evaluate_flow_policies(

@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
     net::IpAddr,
+    sync::Arc,
     time::{Duration, SystemTime},
 };
 
@@ -83,7 +84,7 @@ pub struct FlowSpan {
     pub end_time: SystemTime,
     #[serde(serialize_with = "serialize_span_kind")]
     pub span_kind: SpanKind,
-    pub attributes: SpanAttributes,
+    pub attributes: Arc<SpanAttributes>,
 
     // eBPF map aggregation fields
     #[serde(skip)]
@@ -106,6 +107,17 @@ pub struct FlowSpan {
     pub last_activity_time: SystemTime,
     #[serde(skip)]
     pub timeout_duration: Duration,
+}
+
+impl FlowSpan {
+    /// Returns a mutable reference to the span's attributes.
+    ///
+    /// Calls [`Arc::make_mut`] internally: if the `Arc` has a unique reference (refcount = 1)
+    /// this is allocation-free; otherwise the inner [`SpanAttributes`] is cloned.
+    #[must_use]
+    pub fn attrs_mut(&mut self) -> &mut SpanAttributes {
+        Arc::make_mut(&mut self.attributes)
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1230,7 +1242,7 @@ mod tests {
             start_time: std::time::UNIX_EPOCH + Duration::from_secs(100),
             end_time: std::time::UNIX_EPOCH + Duration::from_secs(200),
             span_kind: SpanKind::Internal,
-            attributes: SpanAttributes::default(),
+            attributes: Arc::new(SpanAttributes::default()),
             flow_key: None,
             last_recorded_packets: 0,
             last_recorded_bytes: 0,
@@ -1255,7 +1267,7 @@ mod tests {
             start_time: std::time::UNIX_EPOCH + Duration::from_secs(100),
             end_time: std::time::UNIX_EPOCH + Duration::from_secs(200),
             span_kind: SpanKind::Internal,
-            attributes: SpanAttributes::default(),
+            attributes: Arc::new(SpanAttributes::default()),
             flow_key: None,
             last_recorded_packets: 0,
             last_recorded_bytes: 0,
@@ -1280,7 +1292,7 @@ mod tests {
             start_time: std::time::UNIX_EPOCH,
             end_time: std::time::UNIX_EPOCH,
             span_kind: SpanKind::Internal,
-            attributes: SpanAttributes::default(),
+            attributes: Arc::new(SpanAttributes::default()),
             flow_key: None,
             last_recorded_packets: 0,
             last_recorded_bytes: 0,
@@ -1292,8 +1304,8 @@ mod tests {
             last_activity_time: std::time::UNIX_EPOCH,
             timeout_duration: Duration::from_secs(0),
         };
-        flow_span.attributes.network_type = EtherType::Ipv4;
-        flow_span.attributes.network_transport = IpProto::Tcp;
+        flow_span.attrs_mut().network_type = EtherType::Ipv4;
+        flow_span.attrs_mut().network_transport = IpProto::Tcp;
 
         let name = flow_span.name();
         assert_eq!(name, Some("flow_ipv4_tcp".to_string()));
@@ -1305,7 +1317,7 @@ mod tests {
             start_time: std::time::UNIX_EPOCH,
             end_time: std::time::UNIX_EPOCH,
             span_kind: SpanKind::Internal,
-            attributes: SpanAttributes::default(),
+            attributes: Arc::new(SpanAttributes::default()),
             flow_key: None,
             last_recorded_packets: 0,
             last_recorded_bytes: 0,
@@ -1317,8 +1329,8 @@ mod tests {
             last_activity_time: std::time::UNIX_EPOCH,
             timeout_duration: Duration::from_secs(0),
         };
-        flow_span.attributes.network_type = EtherType::Ipv6;
-        flow_span.attributes.network_transport = IpProto::Udp;
+        flow_span.attrs_mut().network_type = EtherType::Ipv6;
+        flow_span.attrs_mut().network_transport = IpProto::Udp;
 
         let name = flow_span.name();
         assert_eq!(name, Some("flow_ipv6_udp".to_string()));
@@ -1517,7 +1529,7 @@ mod tests {
             start_time: std::time::UNIX_EPOCH,
             end_time: std::time::UNIX_EPOCH + Duration::from_secs(10),
             span_kind: SpanKind::Internal,
-            attributes: SpanAttributes::default(),
+            attributes: Arc::new(SpanAttributes::default()),
             flow_key: None,
             last_recorded_packets: 0,
             last_recorded_bytes: 0,
@@ -1561,7 +1573,7 @@ mod tests {
             start_time: std::time::UNIX_EPOCH,
             end_time: std::time::UNIX_EPOCH + Duration::from_secs(10),
             span_kind: SpanKind::Internal,
-            attributes: SpanAttributes::default(),
+            attributes: Arc::new(SpanAttributes::default()),
             flow_key: None,
             last_recorded_packets: 0,
             last_recorded_bytes: 0,
@@ -1680,7 +1692,7 @@ mod tests {
             start_time: std::time::UNIX_EPOCH,
             end_time: std::time::UNIX_EPOCH + Duration::from_secs(10),
             span_kind: SpanKind::Internal,
-            attributes: SpanAttributes::default(),
+            attributes: Arc::new(SpanAttributes::default()),
             flow_key: None,
             last_recorded_packets: 0,
             last_recorded_bytes: 0,
@@ -1750,7 +1762,7 @@ mod tests {
             start_time: std::time::UNIX_EPOCH,
             end_time: std::time::UNIX_EPOCH + Duration::from_secs(10),
             span_kind: SpanKind::Internal,
-            attributes: SpanAttributes::default(),
+            attributes: Arc::new(SpanAttributes::default()),
             flow_key: None,
             last_recorded_packets: 0,
             last_recorded_bytes: 0,

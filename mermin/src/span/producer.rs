@@ -889,7 +889,7 @@ impl FlowWorker {
             start_time: UNIX_EPOCH + Duration::from_nanos(start_time_nanos),
             end_time: UNIX_EPOCH + Duration::from_nanos(end_time_nanos),
             span_kind,
-            attributes: SpanAttributes {
+            attributes: Arc::new(SpanAttributes {
                 flow_community_id: community_id.to_string(),
                 flow_direction,
                 flow_connection_state: is_tcp.then_some(stats.tcp_state),
@@ -1015,7 +1015,7 @@ impl FlowWorker {
                 flow_reverse_packets_total: 0,
 
                 ..Default::default()
-            },
+            }),
             flow_key: Some(*flow_key),
             last_recorded_packets: 0,
             last_recorded_bytes: 0,
@@ -1672,15 +1672,16 @@ async fn record_flow(
 
     let flow_span = &mut entry_ref.flow_span;
     let is_tcp = stats.protocol == IpProto::Tcp;
-    flow_span.attributes.flow_connection_state = is_tcp.then_some(stats.tcp_state);
-    flow_span.attributes.flow_bytes_delta = delta_bytes as i64;
-    flow_span.attributes.flow_packets_delta = delta_packets as i64;
-    flow_span.attributes.flow_reverse_bytes_delta = delta_reverse_bytes as i64;
-    flow_span.attributes.flow_reverse_packets_delta = delta_reverse_packets as i64;
-    flow_span.attributes.flow_bytes_total = stats.bytes as i64;
-    flow_span.attributes.flow_packets_total = stats.packets as i64;
-    flow_span.attributes.flow_reverse_bytes_total = stats.reverse_bytes as i64;
-    flow_span.attributes.flow_reverse_packets_total = stats.reverse_packets as i64;
+    let attrs = flow_span.attrs_mut();
+    attrs.flow_connection_state = is_tcp.then_some(stats.tcp_state);
+    attrs.flow_bytes_delta = delta_bytes as i64;
+    attrs.flow_packets_delta = delta_packets as i64;
+    attrs.flow_reverse_bytes_delta = delta_reverse_bytes as i64;
+    attrs.flow_reverse_packets_delta = delta_reverse_packets as i64;
+    attrs.flow_bytes_total = stats.bytes as i64;
+    attrs.flow_packets_total = stats.packets as i64;
+    attrs.flow_reverse_bytes_total = stats.reverse_bytes as i64;
+    attrs.flow_reverse_packets_total = stats.reverse_packets as i64;
 
     flow_span.last_recorded_packets = stats.packets;
     flow_span.last_recorded_bytes = stats.bytes;
@@ -1715,7 +1716,7 @@ async fn record_flow(
             && stats.tcp_syn_ns != 0
             && stats.tcp_syn_ack_ns != 0
         {
-            flow_span.attributes.flow_tcp_handshake_latency = Some(
+            flow_span.attrs_mut().flow_tcp_handshake_latency = Some(
                 TcpFlags::handshake_latency_from_stats(stats.tcp_syn_ns, stats.tcp_syn_ack_ns),
             );
         }
@@ -1728,77 +1729,86 @@ async fn record_flow(
             let current_jitter = Some(stats.tcp_jitter_avg_ns as i64);
 
             if is_server {
-                flow_span.attributes.flow_tcp_svc_latency = current_latency;
-                flow_span.attributes.flow_tcp_svc_jitter = current_jitter;
+                let attrs = flow_span.attrs_mut();
+                attrs.flow_tcp_svc_latency = current_latency;
+                attrs.flow_tcp_svc_jitter = current_jitter;
             } else if is_client {
-                flow_span.attributes.flow_tcp_rndtrip_latency = current_latency;
-                flow_span.attributes.flow_tcp_rndtrip_jitter = current_jitter;
+                let attrs = flow_span.attrs_mut();
+                attrs.flow_tcp_rndtrip_latency = current_latency;
+                attrs.flow_tcp_rndtrip_jitter = current_jitter;
             }
         }
     }
 
     if stats.protocol == IpProto::Icmp || stats.protocol == IpProto::Ipv6Icmp {
-        flow_span.attributes.flow_icmp_type_id = Some(stats.icmp_type);
-        flow_span.attributes.flow_icmp_code_id = Some(stats.icmp_code);
-        flow_span.attributes.flow_reverse_icmp_type_id = Some(stats.reverse_icmp_type);
-        flow_span.attributes.flow_reverse_icmp_code_id = Some(stats.reverse_icmp_code);
+        let attrs = flow_span.attrs_mut();
+        attrs.flow_icmp_type_id = Some(stats.icmp_type);
+        attrs.flow_icmp_code_id = Some(stats.icmp_code);
+        attrs.flow_reverse_icmp_type_id = Some(stats.reverse_icmp_type);
+        attrs.flow_reverse_icmp_code_id = Some(stats.reverse_icmp_code);
     }
 
     let is_ip_flow = stats.ether_type == EtherType::Ipv4 || stats.ether_type == EtherType::Ipv6;
     let is_ipv6 = stats.ether_type == EtherType::Ipv6;
 
     if is_ip_flow {
-        flow_span.attributes.flow_ip_dscp_id = Some(stats.ip_dscp);
-        flow_span.attributes.flow_ip_dscp_name = Some(
+        let attrs = flow_span.attrs_mut();
+        attrs.flow_ip_dscp_id = Some(stats.ip_dscp);
+        attrs.flow_ip_dscp_name = Some(
             IpDscp::try_from_u8(stats.ip_dscp)
                 .unwrap_or_default()
                 .as_str()
                 .to_string(),
         );
-        flow_span.attributes.flow_ip_ecn_id = Some(stats.ip_ecn);
-        flow_span.attributes.flow_ip_ecn_name = Some(
+        attrs.flow_ip_ecn_id = Some(stats.ip_ecn);
+        attrs.flow_ip_ecn_name = Some(
             IpEcn::try_from_u8(stats.ip_ecn)
                 .unwrap_or_default()
                 .as_str()
                 .to_string(),
         );
-        flow_span.attributes.flow_ip_ttl = Some(stats.ip_ttl);
+        attrs.flow_ip_ttl = Some(stats.ip_ttl);
 
-        flow_span.attributes.flow_reverse_ip_dscp_id = Some(stats.reverse_ip_dscp);
-        flow_span.attributes.flow_reverse_ip_dscp_name = Some(
+        attrs.flow_reverse_ip_dscp_id = Some(stats.reverse_ip_dscp);
+        attrs.flow_reverse_ip_dscp_name = Some(
             IpDscp::try_from_u8(stats.reverse_ip_dscp)
                 .unwrap_or_default()
                 .as_str()
                 .to_string(),
         );
-        flow_span.attributes.flow_reverse_ip_ecn_id = Some(stats.reverse_ip_ecn);
-        flow_span.attributes.flow_reverse_ip_ecn_name = Some(
+        attrs.flow_reverse_ip_ecn_id = Some(stats.reverse_ip_ecn);
+        attrs.flow_reverse_ip_ecn_name = Some(
             IpEcn::try_from_u8(stats.reverse_ip_ecn)
                 .unwrap_or_default()
                 .as_str()
                 .to_string(),
         );
-        flow_span.attributes.flow_reverse_ip_ttl = Some(stats.reverse_ip_ttl);
+        attrs.flow_reverse_ip_ttl = Some(stats.reverse_ip_ttl);
     }
 
     if is_ipv6 {
-        flow_span.attributes.flow_ip_flow_label = Some(stats.ip_flow_label);
-        flow_span.attributes.flow_reverse_ip_flow_label = Some(stats.reverse_ip_flow_label);
+        let attrs = flow_span.attrs_mut();
+        attrs.flow_ip_flow_label = Some(stats.ip_flow_label);
+        attrs.flow_reverse_ip_flow_label = Some(stats.reverse_ip_flow_label);
     }
 
     flow_span.last_recorded_time = std::time::SystemTime::now();
 
+    let tcp_flags = flow_span.attributes.flow_tcp_flags_bits;
     let mut recorded_span = flow_span.clone();
-    recorded_span.attributes.flow_end_reason = Some(determine_flow_end_reason(
-        flow_span.attributes.flow_tcp_flags_bits,
+    // Release the shard write-lock before Arc::make_mut so the SpanAttributes clone
+    // (the DashMap entry still holds the other Arc reference, refcount=2) happens
+    // outside the critical section, reducing contention on concurrent flows.
+    drop(entry_ref);
+
+    recorded_span.attrs_mut().flow_end_reason = Some(determine_flow_end_reason(
+        tcp_flags,
         FlowEndReason::ActiveTimeout,
     ));
 
     if recorded_span.end_time < recorded_span.start_time {
         std::mem::swap(&mut recorded_span.start_time, &mut recorded_span.end_time);
     }
-
-    drop(entry_ref);
 
     match flow_span_tx.try_send(recorded_span) {
         Ok(_) => {
@@ -1851,6 +1861,15 @@ pub async fn timeout_and_remove_flow(
 
     let mut flow_span = entry.flow_span;
 
+    // Pre-capture interface name before the eBPF lock scope: flow_span may be
+    // consumed by try_send inside that block, but the name is needed for the
+    // unconditional metrics emitted after the block.
+    let iface_name_owned = flow_span
+        .attributes
+        .network_interface_name
+        .clone()
+        .unwrap_or_else(|| "unknown".to_string());
+
     // Single lock hold: read final stats, emit the span, and remove the eBPF entry.
     // try_send is non-blocking so it is safe to call while holding the mutex.
     if let Some(key) = ebpf_key {
@@ -1887,14 +1906,15 @@ pub async fn timeout_and_remove_flow(
                 .saturating_sub(flow_span.last_recorded_reverse_bytes);
 
             if delta_packets > 0 || delta_reverse_packets > 0 {
-                flow_span.attributes.flow_packets_delta = delta_packets as i64;
-                flow_span.attributes.flow_bytes_delta = delta_bytes as i64;
-                flow_span.attributes.flow_reverse_packets_delta = delta_reverse_packets as i64;
-                flow_span.attributes.flow_reverse_bytes_delta = delta_reverse_bytes as i64;
-                flow_span.attributes.flow_packets_total = stats.packets as i64;
-                flow_span.attributes.flow_bytes_total = stats.bytes as i64;
-                flow_span.attributes.flow_reverse_packets_total = stats.reverse_packets as i64;
-                flow_span.attributes.flow_reverse_bytes_total = stats.reverse_bytes as i64;
+                let attrs = flow_span.attrs_mut();
+                attrs.flow_packets_delta = delta_packets as i64;
+                attrs.flow_bytes_delta = delta_bytes as i64;
+                attrs.flow_reverse_packets_delta = delta_reverse_packets as i64;
+                attrs.flow_reverse_bytes_delta = delta_reverse_bytes as i64;
+                attrs.flow_packets_total = stats.packets as i64;
+                attrs.flow_bytes_total = stats.bytes as i64;
+                attrs.flow_reverse_packets_total = stats.reverse_packets as i64;
+                attrs.flow_reverse_bytes_total = stats.reverse_bytes as i64;
             }
         }
 
@@ -1902,17 +1922,19 @@ pub async fn timeout_and_remove_flow(
             || flow_span.attributes.flow_reverse_packets_delta > 0;
 
         if has_new_packets {
-            let mut recorded_span = flow_span.clone();
-            recorded_span.attributes.flow_end_reason = Some(determine_flow_end_reason(
-                flow_span.attributes.flow_tcp_flags_bits,
+            // flow_span is owned (moved out of the DashMap), so the Arc refcount is 1.
+            // attrs_mut() is allocation-free, and we send the span directly with no clone.
+            let tcp_flags = flow_span.attributes.flow_tcp_flags_bits;
+            flow_span.attrs_mut().flow_end_reason = Some(determine_flow_end_reason(
+                tcp_flags,
                 FlowEndReason::IdleTimeout,
             ));
 
-            if recorded_span.end_time < recorded_span.start_time {
-                std::mem::swap(&mut recorded_span.start_time, &mut recorded_span.end_time);
+            if flow_span.end_time < flow_span.start_time {
+                std::mem::swap(&mut flow_span.start_time, &mut flow_span.end_time);
             }
 
-            match flow_span_tx.try_send(recorded_span) {
+            match flow_span_tx.try_send(flow_span) {
                 Ok(_) => {
                     metrics.channel_producer_ok.inc();
                 }
@@ -1970,11 +1992,7 @@ pub async fn timeout_and_remove_flow(
         drop(map);
     }
 
-    let iface_name = flow_span
-        .attributes
-        .network_interface_name
-        .as_deref()
-        .unwrap_or("unknown");
+    let iface_name = iface_name_owned.as_str();
     metrics::registry::PROCESSING_TOTAL
         .with_label_values(&[FlowSpanProducerStatus::Idled.as_str()])
         .inc();
@@ -2330,10 +2348,10 @@ mod tests {
             start_time: SystemTime::now(),
             end_time: SystemTime::now(),
             span_kind: SpanKind::Internal,
-            attributes: SpanAttributes {
+            attributes: Arc::new(SpanAttributes {
                 flow_packets_total: 10,
                 ..Default::default()
-            },
+            }),
             flow_key: Some(key),
             last_recorded_packets: 0,
             last_recorded_bytes: 0,
@@ -2595,7 +2613,7 @@ mod tests {
         assert_eq!(flow_store.len(), 1);
 
         let mut entry = flow_store.remove(community_id.as_ref()).unwrap().1;
-        entry.flow_span.attributes.flow_end_reason = Some(FlowEndReason::IdleTimeout);
+        entry.flow_span.attrs_mut().flow_end_reason = Some(FlowEndReason::IdleTimeout);
         let _ = flow_span_tx.send(entry.flow_span).await;
 
         assert!(flow_store.is_empty(), "FlowStore should be empty");
@@ -2866,22 +2884,22 @@ mod tests {
         let mut flow_span = create_test_flow_span(FlowKey::default());
 
         // No deltas → no span.
-        flow_span.attributes.flow_packets_delta = 0;
-        flow_span.attributes.flow_reverse_packets_delta = 0;
+        flow_span.attrs_mut().flow_packets_delta = 0;
+        flow_span.attrs_mut().flow_reverse_packets_delta = 0;
         let has_new_packets = flow_span.attributes.flow_packets_delta > 0
             || flow_span.attributes.flow_reverse_packets_delta > 0;
         assert!(!has_new_packets, "zero deltas must not emit a span");
 
         // Forward packets only → span.
-        flow_span.attributes.flow_packets_delta = 5;
-        flow_span.attributes.flow_reverse_packets_delta = 0;
+        flow_span.attrs_mut().flow_packets_delta = 5;
+        flow_span.attrs_mut().flow_reverse_packets_delta = 0;
         let has_new_packets = flow_span.attributes.flow_packets_delta > 0
             || flow_span.attributes.flow_reverse_packets_delta > 0;
         assert!(has_new_packets, "non-zero forward delta must emit a span");
 
         // Reverse packets only → span.
-        flow_span.attributes.flow_packets_delta = 0;
-        flow_span.attributes.flow_reverse_packets_delta = 3;
+        flow_span.attrs_mut().flow_packets_delta = 0;
+        flow_span.attrs_mut().flow_reverse_packets_delta = 3;
         let has_new_packets = flow_span.attributes.flow_packets_delta > 0
             || flow_span.attributes.flow_reverse_packets_delta > 0;
         assert!(has_new_packets, "non-zero reverse delta must emit a span");
@@ -2926,8 +2944,8 @@ mod tests {
         let community_id: Arc<str> = Arc::from("test_cid");
 
         let mut span = create_test_flow_span(FlowKey::default());
-        span.attributes.flow_packets_delta = 10;
-        span.attributes.flow_end_reason = Some(FlowEndReason::IdleTimeout);
+        span.attrs_mut().flow_packets_delta = 10;
+        span.attrs_mut().flow_end_reason = Some(FlowEndReason::IdleTimeout);
 
         flow_store.insert(community_id.clone(), FlowEntry { flow_span: span });
         assert_eq!(flow_store.len(), 1);
