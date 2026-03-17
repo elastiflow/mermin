@@ -732,18 +732,17 @@ impl FlowWorker {
                     .inc();
             }
 
-            let iface_name = self
-                .iface_map
-                .load()
+            let iface_guard = self.iface_map.load();
+            let iface_name = iface_guard
                 .get(&stats.ifindex)
-                .cloned()
-                .unwrap_or_else(|| "unknown".to_string());
+                .map(|s| s.as_str())
+                .unwrap_or("unknown");
             metrics::registry::PROCESSING_TOTAL
                 .with_label_values(&[FlowSpanProducerStatus::Dropped.as_str()])
                 .inc();
             if metrics::registry::debug_enabled() {
                 metrics::registry::FLOW_PRODUCER_FLOW_SPANS_BY_INTERFACE_TOTAL
-                    .with_label_values(&[&iface_name, FlowSpanProducerStatus::Dropped.as_str()])
+                    .with_label_values(&[iface_name, FlowSpanProducerStatus::Dropped.as_str()])
                     .inc();
             }
 
@@ -872,7 +871,11 @@ impl FlowWorker {
         let is_icmpv6 = stats.protocol == IpProto::Ipv6Icmp;
         let start_time_nanos = stats.first_seen_ns + self.boot_time_offset_nanos;
         let end_time_nanos = stats.last_seen_ns + self.boot_time_offset_nanos;
-        let iface_name = self.iface_map.load().get(&stats.ifindex).cloned();
+        let iface_name: Option<Arc<str>> = self
+            .iface_map
+            .load()
+            .get(&stats.ifindex)
+            .map(|s| Arc::from(s.as_str()));
         let (src_addr, dst_addr) = flow_key_to_ip_addrs(flow_key)?;
         let timeout = self.calculate_timeout(stats);
         let span_kind = self
@@ -896,15 +899,17 @@ impl FlowWorker {
                 flow_end_reason: None,
 
                 source_address: src_addr,
+                source_address_str: Arc::from(src_addr.to_string()),
                 source_port: flow_key.src_port,
                 destination_address: dst_addr,
+                destination_address_str: Arc::from(dst_addr.to_string()),
                 destination_port: flow_key.dst_port,
 
                 network_transport: flow_key.protocol,
                 network_type: stats.ether_type,
                 network_interface_index: Some(stats.ifindex),
                 network_interface_name: iface_name.clone(),
-                network_interface_mac: Some(MacAddr::from(stats.src_mac)),
+                network_interface_mac: Some(Arc::from(MacAddr::from(stats.src_mac).to_string())),
 
                 flow_ip_dscp_id: is_ip_flow.then_some(stats.ip_dscp),
                 flow_ip_dscp_name: is_ip_flow.then_some(
@@ -971,9 +976,8 @@ impl FlowWorker {
 
                 process_pid: (stats.pid != 0).then_some(stats.pid),
                 process_executable_name: (stats.pid != 0).then(|| {
-                    String::from_utf8_lossy(&stats.comm)
-                        .trim_end_matches('\0')
-                        .to_string()
+                    let lossy = String::from_utf8_lossy(&stats.comm);
+                    Arc::from(lossy.trim_end_matches('\0'))
                 }),
 
                 flow_icmp_type_id: (is_icmp || is_icmpv6).then_some(stats.icmp_type),
@@ -1097,16 +1101,15 @@ impl FlowWorker {
         flow_span.last_activity_time = flow_span.end_time;
         flow_span.timeout_duration = timeout;
 
-        let iface_name = flow_span
+        let iface_name: Arc<str> = flow_span
             .attributes
             .network_interface_name
-            .as_deref()
-            .unwrap_or("unknown")
-            .to_string();
+            .clone()
+            .unwrap_or_else(|| Arc::from("unknown"));
         metrics::registry::FLOW_SPANS_CREATED_TOTAL.inc();
         if metrics::registry::debug_enabled() {
             metrics::registry::FLOWS_CREATED_BY_INTERFACE_TOTAL
-                .with_label_values(&[&iface_name])
+                .with_label_values(&[&*iface_name])
                 .inc();
         }
 
@@ -1119,7 +1122,7 @@ impl FlowWorker {
                 metrics::registry::FLOW_SPANS_ACTIVE_TOTAL.inc();
                 if metrics::registry::debug_enabled() {
                     metrics::registry::FLOWS_ACTIVE_BY_INTERFACE_TOTAL
-                        .with_label_values(&[&iface_name])
+                        .with_label_values(&[&*iface_name])
                         .inc();
                 }
             }
@@ -1129,20 +1132,19 @@ impl FlowWorker {
                     .attributes
                     .network_interface_name
                     .as_deref()
-                    .unwrap_or("unknown")
-                    .to_string();
+                    .unwrap_or("unknown");
 
-                if old_iface != iface_name {
+                if old_iface != &*iface_name {
                     metrics::registry::FLOW_SPANS_ACTIVE_TOTAL.dec();
                     if metrics::registry::debug_enabled() {
                         metrics::registry::FLOWS_ACTIVE_BY_INTERFACE_TOTAL
-                            .with_label_values(&[&old_iface])
+                            .with_label_values(&[old_iface])
                             .dec();
                     }
                     metrics::registry::FLOW_SPANS_ACTIVE_TOTAL.inc();
                     if metrics::registry::debug_enabled() {
                         metrics::registry::FLOWS_ACTIVE_BY_INTERFACE_TOTAL
-                            .with_label_values(&[&iface_name])
+                            .with_label_values(&[&*iface_name])
                             .inc();
                     }
                 }
@@ -1618,23 +1620,16 @@ async fn record_flow(
     }
 
     if delta_packets > 0 || delta_reverse_packets > 0 {
-        let interface_name_for_metrics = flow_store
+        let interface_name_arc = flow_store
             .get(community_id)
-            .and_then(|entry| {
-                entry
-                    .flow_span
-                    .attributes
-                    .network_interface_name
-                    .as_deref()
-                    .map(|s| s.to_string())
-            })
-            .unwrap_or_else(|| "unknown".to_string());
+            .and_then(|entry| entry.flow_span.attributes.network_interface_name.clone());
+        let interface_name_for_metrics = interface_name_arc.as_deref().unwrap_or("unknown");
 
         if delta_packets > 0 {
             metrics::registry::PACKETS_TOTAL.inc_by(delta_packets);
             if metrics::registry::debug_enabled() {
                 metrics::registry::PACKETS_BY_INTERFACE_TOTAL
-                    .with_label_values(&[&interface_name_for_metrics, stats.direction.as_str()])
+                    .with_label_values(&[interface_name_for_metrics, stats.direction.as_str()])
                     .inc_by(delta_packets);
             }
         }
@@ -1642,7 +1637,7 @@ async fn record_flow(
             metrics::registry::BYTES_TOTAL.inc_by(delta_bytes);
             if metrics::registry::debug_enabled() {
                 metrics::registry::BYTES_BY_INTERFACE_TOTAL
-                    .with_label_values(&[&interface_name_for_metrics, stats.direction.as_str()])
+                    .with_label_values(&[interface_name_for_metrics, stats.direction.as_str()])
                     .inc_by(delta_bytes);
             }
         }
@@ -1651,7 +1646,7 @@ async fn record_flow(
             metrics::registry::PACKETS_TOTAL.inc_by(delta_reverse_packets);
             if metrics::registry::debug_enabled() {
                 metrics::registry::PACKETS_BY_INTERFACE_TOTAL
-                    .with_label_values(&[&interface_name_for_metrics, reverse_direction.as_str()])
+                    .with_label_values(&[interface_name_for_metrics, reverse_direction.as_str()])
                     .inc_by(delta_reverse_packets);
             }
         }
@@ -1660,7 +1655,7 @@ async fn record_flow(
             metrics::registry::BYTES_TOTAL.inc_by(delta_reverse_bytes);
             if metrics::registry::debug_enabled() {
                 metrics::registry::BYTES_BY_INTERFACE_TOTAL
-                    .with_label_values(&[&interface_name_for_metrics, reverse_direction.as_str()])
+                    .with_label_values(&[interface_name_for_metrics, reverse_direction.as_str()])
                     .inc_by(delta_reverse_bytes);
             }
         }
@@ -1861,11 +1856,11 @@ pub async fn timeout_and_remove_flow(
     // Pre-capture interface name before the eBPF lock scope: flow_span may be
     // consumed by try_send inside that block, but the name is needed for the
     // unconditional metrics emitted after the block.
-    let iface_name_owned = flow_span
+    let iface_name_owned: Arc<str> = flow_span
         .attributes
         .network_interface_name
         .clone()
-        .unwrap_or_else(|| "unknown".to_string());
+        .unwrap_or_else(|| Arc::from("unknown"));
 
     // Single lock hold: read final stats, emit the span, and remove the eBPF entry.
     // try_send is non-blocking so it is safe to call while holding the mutex.
@@ -1989,7 +1984,7 @@ pub async fn timeout_and_remove_flow(
         drop(map);
     }
 
-    let iface_name = iface_name_owned.as_str();
+    let iface_name: &str = &iface_name_owned;
     metrics::registry::PROCESSING_TOTAL
         .with_label_values(&[FlowSpanProducerStatus::Idled.as_str()])
         .inc();

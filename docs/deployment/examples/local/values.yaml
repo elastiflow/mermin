@@ -1,3 +1,4 @@
 image:
   repository: mermin
   tag: latest
+  # pullPolicy: Never # Uncomment to build the image locally

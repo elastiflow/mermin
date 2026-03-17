@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     collections::HashMap,
     net::IpAddr,
     sync::Arc,
@@ -133,17 +134,23 @@ pub struct SpanAttributes {
 
     // L2-L4 Attributes
     pub source_address: IpAddr,
+    /// Pre-formatted string representation of `source_address`, cached at construction
+    /// time so that per-export calls to `record()` can clone the `Arc` cheaply instead
+    /// of re-formatting the IP on every export.  Must remain in sync with `source_address`.
+    pub source_address_str: Arc<str>,
     pub source_port: u16,
     pub destination_address: IpAddr,
+    /// Pre-formatted string representation of `destination_address`. Same caching
+    /// rationale as `source_address_str`.
+    pub destination_address_str: Arc<str>,
     pub destination_port: u16,
     #[serde(serialize_with = "serialize_ip_proto")]
     pub network_transport: IpProto,
     #[serde(serialize_with = "serialize_ether_type")]
     pub network_type: EtherType,
     pub network_interface_index: Option<u32>,
-    pub network_interface_name: Option<String>,
-    #[serde(serialize_with = "serialize_option_mac_addr")]
-    pub network_interface_mac: Option<pnet::datalink::MacAddr>,
+    pub network_interface_name: Option<Arc<str>>,
+    pub network_interface_mac: Option<Arc<str>>,
     pub flow_ip_dscp_id: Option<u8>,
     pub flow_ip_dscp_name: Option<&'static str>,
     pub flow_ip_ecn_id: Option<u8>,
@@ -179,7 +186,7 @@ pub struct SpanAttributes {
     /// PID of the process that created/owns this flow (None if unknown)
     pub process_pid: Option<u32>,
     /// Executable name of the process (TASK_COMM_LEN, None if unknown)
-    pub process_executable_name: Option<String>,
+    pub process_executable_name: Option<Arc<str>>,
 
     // Flow Metrics
     pub flow_bytes_delta: i64,
@@ -203,98 +210,97 @@ pub struct SpanAttributes {
     pub ipip_network_type: Option<EtherType>,
     #[serde(serialize_with = "serialize_option_ip_proto")]
     pub ipip_network_transport: Option<IpProto>,
-    pub ipip_source_address: Option<IpAddr>,
-    pub ipip_destination_address: Option<IpAddr>,
+    pub ipip_source_address: Option<Arc<str>>,
+    pub ipip_destination_address: Option<Arc<str>>,
 
     // Tunnel Attributes
     #[serde(serialize_with = "serialize_option_tunnel_type")]
     pub tunnel_type: Option<TunnelType>,
-    #[serde(serialize_with = "serialize_option_mac_addr")]
-    pub tunnel_network_interface_mac: Option<pnet::datalink::MacAddr>,
+    pub tunnel_network_interface_mac: Option<Arc<str>>,
     #[serde(serialize_with = "serialize_option_ether_type")]
     pub tunnel_network_type: Option<EtherType>,
     #[serde(serialize_with = "serialize_option_ip_proto")]
     pub tunnel_network_transport: Option<IpProto>,
-    pub tunnel_source_address: Option<IpAddr>,
+    pub tunnel_source_address: Option<Arc<str>>,
     pub tunnel_source_port: Option<u16>,
-    pub tunnel_destination_address: Option<IpAddr>,
+    pub tunnel_destination_address: Option<Arc<str>>,
     pub tunnel_destination_port: Option<u16>,
     pub tunnel_id: Option<u32>,
     pub tunnel_ipsec_ah_spi: Option<u32>,
 
     // Kubernetes & Application Attributes
-    pub source_k8s_cluster_name: Option<String>,
-    pub source_k8s_cluster_uid: Option<String>,
-    pub source_k8s_node_annotations: Option<HashMap<String, String>>,
-    pub source_k8s_node_name: Option<String>,
-    pub source_k8s_node_uid: Option<String>,
-    pub source_k8s_namespace_name: Option<String>,
-    pub source_k8s_pod_annotations: Option<HashMap<String, String>>,
-    pub source_k8s_pod_name: Option<String>,
-    pub source_k8s_pod_uid: Option<String>,
-    pub source_k8s_container_name: Option<String>,
-    pub source_k8s_deployment_annotations: Option<HashMap<String, String>>,
-    pub source_k8s_deployment_name: Option<String>,
-    pub source_k8s_deployment_uid: Option<String>,
-    pub source_k8s_replicaset_annotations: Option<HashMap<String, String>>,
-    pub source_k8s_replicaset_name: Option<String>,
-    pub source_k8s_replicaset_uid: Option<String>,
-    pub source_k8s_statefulset_annotations: Option<HashMap<String, String>>,
-    pub source_k8s_statefulset_name: Option<String>,
-    pub source_k8s_statefulset_uid: Option<String>,
-    pub source_k8s_daemonset_annotations: Option<HashMap<String, String>>,
-    pub source_k8s_daemonset_name: Option<String>,
-    pub source_k8s_daemonset_uid: Option<String>,
-    pub source_k8s_job_annotations: Option<HashMap<String, String>>,
-    pub source_k8s_job_name: Option<String>,
-    pub source_k8s_job_uid: Option<String>,
-    pub source_k8s_cronjob_annotations: Option<HashMap<String, String>>,
-    pub source_k8s_cronjob_name: Option<String>,
-    pub source_k8s_cronjob_uid: Option<String>,
-    pub source_k8s_service_annotations: Option<HashMap<String, String>>,
-    pub source_k8s_service_name: Option<String>,
-    pub source_k8s_service_uid: Option<String>,
-    pub destination_k8s_cluster_name: Option<String>,
-    pub destination_k8s_cluster_uid: Option<String>,
-    pub destination_k8s_node_annotations: Option<HashMap<String, String>>,
-    pub destination_k8s_node_name: Option<String>,
-    pub destination_k8s_node_uid: Option<String>,
-    pub destination_k8s_namespace_name: Option<String>,
-    pub destination_k8s_pod_annotations: Option<HashMap<String, String>>,
-    pub destination_k8s_pod_name: Option<String>,
-    pub destination_k8s_pod_uid: Option<String>,
-    pub destination_k8s_container_name: Option<String>,
-    pub destination_k8s_deployment_annotations: Option<HashMap<String, String>>,
-    pub destination_k8s_deployment_name: Option<String>,
-    pub destination_k8s_deployment_uid: Option<String>,
-    pub destination_k8s_replicaset_annotations: Option<HashMap<String, String>>,
-    pub destination_k8s_replicaset_name: Option<String>,
-    pub destination_k8s_replicaset_uid: Option<String>,
-    pub destination_k8s_statefulset_annotations: Option<HashMap<String, String>>,
-    pub destination_k8s_statefulset_name: Option<String>,
-    pub destination_k8s_statefulset_uid: Option<String>,
-    pub destination_k8s_daemonset_annotations: Option<HashMap<String, String>>,
-    pub destination_k8s_daemonset_name: Option<String>,
-    pub destination_k8s_daemonset_uid: Option<String>,
-    pub destination_k8s_job_annotations: Option<HashMap<String, String>>,
-    pub destination_k8s_job_name: Option<String>,
-    pub destination_k8s_job_uid: Option<String>,
-    pub destination_k8s_cronjob_annotations: Option<HashMap<String, String>>,
-    pub destination_k8s_cronjob_name: Option<String>,
-    pub destination_k8s_cronjob_uid: Option<String>,
-    pub destination_k8s_service_annotations: Option<HashMap<String, String>>,
-    pub destination_k8s_service_name: Option<String>,
-    pub destination_k8s_service_uid: Option<String>,
+    pub source_k8s_cluster_name: Option<Arc<str>>,
+    pub source_k8s_cluster_uid: Option<Arc<str>>,
+    pub source_k8s_node_annotations: Option<HashMap<String, Arc<str>>>,
+    pub source_k8s_node_name: Option<Arc<str>>,
+    pub source_k8s_node_uid: Option<Arc<str>>,
+    pub source_k8s_namespace_name: Option<Arc<str>>,
+    pub source_k8s_pod_annotations: Option<HashMap<String, Arc<str>>>,
+    pub source_k8s_pod_name: Option<Arc<str>>,
+    pub source_k8s_pod_uid: Option<Arc<str>>,
+    pub source_k8s_container_name: Option<Arc<str>>,
+    pub source_k8s_deployment_annotations: Option<HashMap<String, Arc<str>>>,
+    pub source_k8s_deployment_name: Option<Arc<str>>,
+    pub source_k8s_deployment_uid: Option<Arc<str>>,
+    pub source_k8s_replicaset_annotations: Option<HashMap<String, Arc<str>>>,
+    pub source_k8s_replicaset_name: Option<Arc<str>>,
+    pub source_k8s_replicaset_uid: Option<Arc<str>>,
+    pub source_k8s_statefulset_annotations: Option<HashMap<String, Arc<str>>>,
+    pub source_k8s_statefulset_name: Option<Arc<str>>,
+    pub source_k8s_statefulset_uid: Option<Arc<str>>,
+    pub source_k8s_daemonset_annotations: Option<HashMap<String, Arc<str>>>,
+    pub source_k8s_daemonset_name: Option<Arc<str>>,
+    pub source_k8s_daemonset_uid: Option<Arc<str>>,
+    pub source_k8s_job_annotations: Option<HashMap<String, Arc<str>>>,
+    pub source_k8s_job_name: Option<Arc<str>>,
+    pub source_k8s_job_uid: Option<Arc<str>>,
+    pub source_k8s_cronjob_annotations: Option<HashMap<String, Arc<str>>>,
+    pub source_k8s_cronjob_name: Option<Arc<str>>,
+    pub source_k8s_cronjob_uid: Option<Arc<str>>,
+    pub source_k8s_service_annotations: Option<HashMap<String, Arc<str>>>,
+    pub source_k8s_service_name: Option<Arc<str>>,
+    pub source_k8s_service_uid: Option<Arc<str>>,
+    pub destination_k8s_cluster_name: Option<Arc<str>>,
+    pub destination_k8s_cluster_uid: Option<Arc<str>>,
+    pub destination_k8s_node_annotations: Option<HashMap<String, Arc<str>>>,
+    pub destination_k8s_node_name: Option<Arc<str>>,
+    pub destination_k8s_node_uid: Option<Arc<str>>,
+    pub destination_k8s_namespace_name: Option<Arc<str>>,
+    pub destination_k8s_pod_annotations: Option<HashMap<String, Arc<str>>>,
+    pub destination_k8s_pod_name: Option<Arc<str>>,
+    pub destination_k8s_pod_uid: Option<Arc<str>>,
+    pub destination_k8s_container_name: Option<Arc<str>>,
+    pub destination_k8s_deployment_annotations: Option<HashMap<String, Arc<str>>>,
+    pub destination_k8s_deployment_name: Option<Arc<str>>,
+    pub destination_k8s_deployment_uid: Option<Arc<str>>,
+    pub destination_k8s_replicaset_annotations: Option<HashMap<String, Arc<str>>>,
+    pub destination_k8s_replicaset_name: Option<Arc<str>>,
+    pub destination_k8s_replicaset_uid: Option<Arc<str>>,
+    pub destination_k8s_statefulset_annotations: Option<HashMap<String, Arc<str>>>,
+    pub destination_k8s_statefulset_name: Option<Arc<str>>,
+    pub destination_k8s_statefulset_uid: Option<Arc<str>>,
+    pub destination_k8s_daemonset_annotations: Option<HashMap<String, Arc<str>>>,
+    pub destination_k8s_daemonset_name: Option<Arc<str>>,
+    pub destination_k8s_daemonset_uid: Option<Arc<str>>,
+    pub destination_k8s_job_annotations: Option<HashMap<String, Arc<str>>>,
+    pub destination_k8s_job_name: Option<Arc<str>>,
+    pub destination_k8s_job_uid: Option<Arc<str>>,
+    pub destination_k8s_cronjob_annotations: Option<HashMap<String, Arc<str>>>,
+    pub destination_k8s_cronjob_name: Option<Arc<str>>,
+    pub destination_k8s_cronjob_uid: Option<Arc<str>>,
+    pub destination_k8s_service_annotations: Option<HashMap<String, Arc<str>>>,
+    pub destination_k8s_service_name: Option<Arc<str>>,
+    pub destination_k8s_service_uid: Option<Arc<str>>,
     pub network_policies_ingress: Option<Vec<String>>,
     pub network_policies_egress: Option<Vec<String>>,
     /// Container runtime name for source (e.g., from Docker/containerd).
     /// Distinct from source_k8s_container_name which comes from Pod spec.
-    pub source_container_name: Option<String>,
-    pub source_container_image_name: Option<String>,
+    pub source_container_name: Option<Arc<str>>,
+    pub source_container_image_name: Option<Arc<str>>,
     /// Container runtime name for destination (e.g., from Docker/containerd).
     /// Distinct from destination_k8s_container_name which comes from Pod spec.
-    pub destination_container_name: Option<String>,
-    pub destination_container_image_name: Option<String>,
+    pub destination_container_name: Option<Arc<str>>,
+    pub destination_container_image_name: Option<Arc<str>>,
 }
 
 impl Default for SpanAttributes {
@@ -305,8 +311,10 @@ impl Default for SpanAttributes {
             flow_connection_state: None,
             flow_end_reason: None,
             source_address: IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
+            source_address_str: Arc::from("0.0.0.0"),
             source_port: 0,
             destination_address: IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
+            destination_address_str: Arc::from("0.0.0.0"),
             destination_port: 0,
             network_transport: IpProto::default(),
             network_type: EtherType::default(),
@@ -455,12 +463,36 @@ impl Traceable for FlowSpan {
         self.end_time
     }
 
-    fn name(&self) -> Option<String> {
-        Some(format!(
-            "flow_{}_{}",
-            self.attributes.network_type.as_str(),
-            self.attributes.network_transport.as_str()
-        ))
+    fn name(&self) -> Option<Cow<'static, str>> {
+        let s = match (
+            self.attributes.network_type,
+            self.attributes.network_transport,
+        ) {
+            (EtherType::Ipv4, IpProto::Tcp) => "flow_ipv4_tcp",
+            (EtherType::Ipv4, IpProto::Udp) => "flow_ipv4_udp",
+            (EtherType::Ipv4, IpProto::Icmp) => "flow_ipv4_icmp",
+            (EtherType::Ipv4, IpProto::Sctp) => "flow_ipv4_sctp",
+            (EtherType::Ipv4, IpProto::Gre) => "flow_ipv4_gre",
+            (EtherType::Ipv4, IpProto::Esp) => "flow_ipv4_esp",
+            (EtherType::Ipv4, IpProto::Ah) => "flow_ipv4_ah",
+            (EtherType::Ipv4, IpProto::Rsvp) => "flow_ipv4_rsvp",
+            (EtherType::Ipv6, IpProto::Tcp) => "flow_ipv6_tcp",
+            (EtherType::Ipv6, IpProto::Udp) => "flow_ipv6_udp",
+            (EtherType::Ipv6, IpProto::Ipv6Icmp) => "flow_ipv6_icmpv6",
+            (EtherType::Ipv6, IpProto::Sctp) => "flow_ipv6_sctp",
+            (EtherType::Ipv6, IpProto::Gre) => "flow_ipv6_gre",
+            (EtherType::Ipv6, IpProto::Esp) => "flow_ipv6_esp",
+            (EtherType::Ipv6, IpProto::Ah) => "flow_ipv6_ah",
+            (EtherType::Arp, _) => "flow_arp",
+            _ => {
+                return Some(Cow::Owned(format!(
+                    "flow_{}_{}",
+                    self.attributes.network_type.as_str(),
+                    self.attributes.network_transport.as_str(),
+                )));
+            }
+        };
+        Some(Cow::Borrowed(s))
     }
 
     fn span_kind(&self) -> opentelemetry::trace::SpanKind {
@@ -475,7 +507,7 @@ impl Traceable for FlowSpan {
                 if let Some(ref map) = $map {
                     for (key, value) in map {
                         let attr_key = format!("{}.{}", $prefix, key);
-                        kvs.push(KeyValue::new(attr_key, value.to_owned()));
+                        kvs.push(KeyValue::new(attr_key, Arc::clone(value)));
                     }
                 }
             };
@@ -491,15 +523,15 @@ impl Traceable for FlowSpan {
         ));
         kvs.push(KeyValue::new(
             "network.type",
-            self.attributes.network_type.to_owned().as_str(),
+            self.attributes.network_type.as_str(),
         ));
         kvs.push(KeyValue::new(
             "network.transport",
-            self.attributes.network_transport.to_owned().as_str(),
+            self.attributes.network_transport.as_str(),
         ));
         kvs.push(KeyValue::new(
             "source.address",
-            self.attributes.source_address.to_string(),
+            Arc::clone(&self.attributes.source_address_str),
         ));
         kvs.push(KeyValue::new(
             "source.port",
@@ -507,7 +539,7 @@ impl Traceable for FlowSpan {
         ));
         kvs.push(KeyValue::new(
             "destination.address",
-            self.attributes.destination_address.to_string(),
+            Arc::clone(&self.attributes.destination_address_str),
         ));
         kvs.push(KeyValue::new(
             "destination.port",
@@ -555,10 +587,10 @@ impl Traceable for FlowSpan {
             kvs.push(KeyValue::new("network.interface.index", value as i64));
         }
         if let Some(ref value) = self.attributes.network_interface_name {
-            kvs.push(KeyValue::new("network.interface.name", value.to_owned()));
+            kvs.push(KeyValue::new("network.interface.name", Arc::clone(value)));
         }
         if let Some(ref value) = self.attributes.network_interface_mac {
-            kvs.push(KeyValue::new("network.interface.mac", value.to_string()));
+            kvs.push(KeyValue::new("network.interface.mac", Arc::clone(value)));
         }
         if let Some(value) = self.attributes.flow_ip_dscp_id {
             kvs.push(KeyValue::new("flow.ip.dscp.id", value as i64));
@@ -620,7 +652,7 @@ impl Traceable for FlowSpan {
         if let Some(ref value) = self.attributes.flow_tcp_flags_tags {
             let flag_values: Vec<StringValue> = value
                 .iter()
-                .map(|f| StringValue::from(f.to_string()))
+                .map(|f| StringValue::from(f.as_str()))
                 .collect();
             kvs.push(KeyValue::new(
                 "flow.tcp.flags.tags",
@@ -633,7 +665,7 @@ impl Traceable for FlowSpan {
         if let Some(ref value) = self.attributes.flow_reverse_tcp_flags_tags {
             let flag_values: Vec<StringValue> = value
                 .iter()
-                .map(|f| StringValue::from(f.to_string()))
+                .map(|f| StringValue::from(f.as_str()))
                 .collect();
             kvs.push(KeyValue::new(
                 "flow.reverse.tcp.flags.tags",
@@ -671,13 +703,13 @@ impl Traceable for FlowSpan {
             kvs.push(KeyValue::new("ipip.network.type", value.as_str()));
         }
         if let Some(ref value) = self.attributes.ipip_network_transport {
-            kvs.push(KeyValue::new("ipip.network.transport", value.to_string()));
+            kvs.push(KeyValue::new("ipip.network.transport", value.as_str()));
         }
         if let Some(ref value) = self.attributes.ipip_source_address {
-            kvs.push(KeyValue::new("ipip.source.address", value.to_string()));
+            kvs.push(KeyValue::new("ipip.source.address", Arc::clone(value)));
         }
         if let Some(ref value) = self.attributes.ipip_destination_address {
-            kvs.push(KeyValue::new("ipip.destination.address", value.to_string()));
+            kvs.push(KeyValue::new("ipip.destination.address", Arc::clone(value)));
         }
         if let Some(ref value) = self.attributes.tunnel_type {
             kvs.push(KeyValue::new("tunnel.type", value.as_str()));
@@ -685,28 +717,25 @@ impl Traceable for FlowSpan {
         if let Some(ref value) = self.attributes.tunnel_network_interface_mac {
             kvs.push(KeyValue::new(
                 "tunnel.network.interface.mac",
-                value.to_string(),
+                Arc::clone(value),
             ));
         }
         if let Some(value) = self.attributes.tunnel_network_type {
-            kvs.push(KeyValue::new(
-                "tunnel.network.type",
-                value.as_str().to_string(),
-            ));
+            kvs.push(KeyValue::new("tunnel.network.type", value.as_str()));
         }
         if let Some(value) = self.attributes.tunnel_network_transport {
-            kvs.push(KeyValue::new("tunnel.network.transport", value.to_string()));
+            kvs.push(KeyValue::new("tunnel.network.transport", value.as_str()));
         }
-        if let Some(value) = self.attributes.tunnel_source_address {
-            kvs.push(KeyValue::new("tunnel.source.address", value.to_string()));
+        if let Some(ref value) = self.attributes.tunnel_source_address {
+            kvs.push(KeyValue::new("tunnel.source.address", Arc::clone(value)));
         }
         if let Some(value) = self.attributes.tunnel_source_port {
             kvs.push(KeyValue::new("tunnel.source.port", value as i64));
         }
-        if let Some(value) = self.attributes.tunnel_destination_address {
+        if let Some(ref value) = self.attributes.tunnel_destination_address {
             kvs.push(KeyValue::new(
                 "tunnel.destination.address",
-                value.to_string(),
+                Arc::clone(value),
             ));
         }
         if let Some(value) = self.attributes.tunnel_destination_port {
@@ -719,36 +748,42 @@ impl Traceable for FlowSpan {
             kvs.push(KeyValue::new("tunnel.ipsec.ah.spi", value as i64));
         }
         if let Some(ref value) = self.attributes.source_k8s_cluster_name {
-            kvs.push(KeyValue::new("source.k8s.cluster.name", value.to_owned()));
+            kvs.push(KeyValue::new("source.k8s.cluster.name", Arc::clone(value)));
         }
         if let Some(ref value) = self.attributes.source_k8s_cluster_uid {
-            kvs.push(KeyValue::new("source.k8s.cluster.uid", value.to_owned()));
+            kvs.push(KeyValue::new("source.k8s.cluster.uid", Arc::clone(value)));
         }
         flatten_annotations!(
             "source.k8s.node.annotations",
             self.attributes.source_k8s_node_annotations
         );
         if let Some(ref value) = self.attributes.source_k8s_node_name {
-            kvs.push(KeyValue::new("source.k8s.node.name", value.to_owned()));
+            kvs.push(KeyValue::new("source.k8s.node.name", Arc::clone(value)));
         }
         if let Some(ref value) = self.attributes.source_k8s_node_uid {
-            kvs.push(KeyValue::new("source.k8s.node.uid", value.to_owned()));
+            kvs.push(KeyValue::new("source.k8s.node.uid", Arc::clone(value)));
         }
         if let Some(ref value) = self.attributes.source_k8s_namespace_name {
-            kvs.push(KeyValue::new("source.k8s.namespace.name", value.to_owned()));
+            kvs.push(KeyValue::new(
+                "source.k8s.namespace.name",
+                Arc::clone(value),
+            ));
         }
         flatten_annotations!(
             "source.k8s.pod.annotations",
             self.attributes.source_k8s_pod_annotations
         );
         if let Some(ref value) = self.attributes.source_k8s_pod_name {
-            kvs.push(KeyValue::new("source.k8s.pod.name", value.to_owned()));
+            kvs.push(KeyValue::new("source.k8s.pod.name", Arc::clone(value)));
         }
         if let Some(ref value) = self.attributes.source_k8s_pod_uid {
-            kvs.push(KeyValue::new("source.k8s.pod.uid", value.to_owned()));
+            kvs.push(KeyValue::new("source.k8s.pod.uid", Arc::clone(value)));
         }
         if let Some(ref value) = self.attributes.source_k8s_container_name {
-            kvs.push(KeyValue::new("source.k8s.container.name", value.to_owned()));
+            kvs.push(KeyValue::new(
+                "source.k8s.container.name",
+                Arc::clone(value),
+            ));
         }
         flatten_annotations!(
             "source.k8s.deployment.annotations",
@@ -757,11 +792,14 @@ impl Traceable for FlowSpan {
         if let Some(ref value) = self.attributes.source_k8s_deployment_name {
             kvs.push(KeyValue::new(
                 "source.k8s.deployment.name",
-                value.to_owned(),
+                Arc::clone(value),
             ));
         }
         if let Some(ref value) = self.attributes.source_k8s_deployment_uid {
-            kvs.push(KeyValue::new("source.k8s.deployment.uid", value.to_owned()));
+            kvs.push(KeyValue::new(
+                "source.k8s.deployment.uid",
+                Arc::clone(value),
+            ));
         }
         flatten_annotations!(
             "source.k8s.replicaset.annotations",
@@ -770,11 +808,14 @@ impl Traceable for FlowSpan {
         if let Some(ref value) = self.attributes.source_k8s_replicaset_name {
             kvs.push(KeyValue::new(
                 "source.k8s.replicaset.name",
-                value.to_owned(),
+                Arc::clone(value),
             ));
         }
         if let Some(ref value) = self.attributes.source_k8s_replicaset_uid {
-            kvs.push(KeyValue::new("source.k8s.replicaset.uid", value.to_owned()));
+            kvs.push(KeyValue::new(
+                "source.k8s.replicaset.uid",
+                Arc::clone(value),
+            ));
         }
         flatten_annotations!(
             "source.k8s.statefulset.annotations",
@@ -783,13 +824,13 @@ impl Traceable for FlowSpan {
         if let Some(ref value) = self.attributes.source_k8s_statefulset_name {
             kvs.push(KeyValue::new(
                 "source.k8s.statefulset.name",
-                value.to_owned(),
+                Arc::clone(value),
             ));
         }
         if let Some(ref value) = self.attributes.source_k8s_statefulset_uid {
             kvs.push(KeyValue::new(
                 "source.k8s.statefulset.uid",
-                value.to_owned(),
+                Arc::clone(value),
             ));
         }
         flatten_annotations!(
@@ -797,51 +838,54 @@ impl Traceable for FlowSpan {
             self.attributes.source_k8s_daemonset_annotations
         );
         if let Some(ref value) = self.attributes.source_k8s_daemonset_name {
-            kvs.push(KeyValue::new("source.k8s.daemonset.name", value.to_owned()));
+            kvs.push(KeyValue::new(
+                "source.k8s.daemonset.name",
+                Arc::clone(value),
+            ));
         }
         if let Some(ref value) = self.attributes.source_k8s_daemonset_uid {
-            kvs.push(KeyValue::new("source.k8s.daemonset.uid", value.to_owned()));
+            kvs.push(KeyValue::new("source.k8s.daemonset.uid", Arc::clone(value)));
         }
         flatten_annotations!(
             "source.k8s.job.annotations",
             self.attributes.source_k8s_job_annotations
         );
         if let Some(ref value) = self.attributes.source_k8s_job_name {
-            kvs.push(KeyValue::new("source.k8s.job.name", value.to_owned()));
+            kvs.push(KeyValue::new("source.k8s.job.name", Arc::clone(value)));
         }
         if let Some(ref value) = self.attributes.source_k8s_job_uid {
-            kvs.push(KeyValue::new("source.k8s.job.uid", value.to_owned()));
+            kvs.push(KeyValue::new("source.k8s.job.uid", Arc::clone(value)));
         }
         flatten_annotations!(
             "source.k8s.cronjob.annotations",
             self.attributes.source_k8s_cronjob_annotations
         );
         if let Some(ref value) = self.attributes.source_k8s_cronjob_name {
-            kvs.push(KeyValue::new("source.k8s.cronjob.name", value.to_owned()));
+            kvs.push(KeyValue::new("source.k8s.cronjob.name", Arc::clone(value)));
         }
         if let Some(ref value) = self.attributes.source_k8s_cronjob_uid {
-            kvs.push(KeyValue::new("source.k8s.cronjob.uid", value.to_owned()));
+            kvs.push(KeyValue::new("source.k8s.cronjob.uid", Arc::clone(value)));
         }
         flatten_annotations!(
             "source.k8s.service.annotations",
             self.attributes.source_k8s_service_annotations
         );
         if let Some(ref value) = self.attributes.source_k8s_service_name {
-            kvs.push(KeyValue::new("source.k8s.service.name", value.to_owned()));
+            kvs.push(KeyValue::new("source.k8s.service.name", Arc::clone(value)));
         }
         if let Some(ref value) = self.attributes.source_k8s_service_uid {
-            kvs.push(KeyValue::new("source.k8s.service.uid", value.to_owned()));
+            kvs.push(KeyValue::new("source.k8s.service.uid", Arc::clone(value)));
         }
         if let Some(ref value) = self.attributes.destination_k8s_cluster_name {
             kvs.push(KeyValue::new(
                 "destination.k8s.cluster.name",
-                value.to_owned(),
+                Arc::clone(value),
             ));
         }
         if let Some(ref value) = self.attributes.destination_k8s_cluster_uid {
             kvs.push(KeyValue::new(
                 "destination.k8s.cluster.uid",
-                value.to_owned(),
+                Arc::clone(value),
             ));
         }
         flatten_annotations!(
@@ -849,15 +893,18 @@ impl Traceable for FlowSpan {
             self.attributes.destination_k8s_node_annotations
         );
         if let Some(ref value) = self.attributes.destination_k8s_node_name {
-            kvs.push(KeyValue::new("destination.k8s.node.name", value.to_owned()));
+            kvs.push(KeyValue::new(
+                "destination.k8s.node.name",
+                Arc::clone(value),
+            ));
         }
         if let Some(ref value) = self.attributes.destination_k8s_node_uid {
-            kvs.push(KeyValue::new("destination.k8s.node.uid", value.to_owned()));
+            kvs.push(KeyValue::new("destination.k8s.node.uid", Arc::clone(value)));
         }
         if let Some(ref value) = self.attributes.destination_k8s_namespace_name {
             kvs.push(KeyValue::new(
                 "destination.k8s.namespace.name",
-                value.to_owned(),
+                Arc::clone(value),
             ));
         }
         flatten_annotations!(
@@ -865,15 +912,15 @@ impl Traceable for FlowSpan {
             self.attributes.destination_k8s_pod_annotations
         );
         if let Some(ref value) = self.attributes.destination_k8s_pod_name {
-            kvs.push(KeyValue::new("destination.k8s.pod.name", value.to_owned()));
+            kvs.push(KeyValue::new("destination.k8s.pod.name", Arc::clone(value)));
         }
         if let Some(ref value) = self.attributes.destination_k8s_pod_uid {
-            kvs.push(KeyValue::new("destination.k8s.pod.uid", value.to_owned()));
+            kvs.push(KeyValue::new("destination.k8s.pod.uid", Arc::clone(value)));
         }
         if let Some(ref value) = self.attributes.destination_k8s_container_name {
             kvs.push(KeyValue::new(
                 "destination.k8s.container.name",
-                value.to_owned(),
+                Arc::clone(value),
             ));
         }
         flatten_annotations!(
@@ -883,13 +930,13 @@ impl Traceable for FlowSpan {
         if let Some(ref value) = self.attributes.destination_k8s_deployment_name {
             kvs.push(KeyValue::new(
                 "destination.k8s.deployment.name",
-                value.to_owned(),
+                Arc::clone(value),
             ));
         }
         if let Some(ref value) = self.attributes.destination_k8s_deployment_uid {
             kvs.push(KeyValue::new(
                 "destination.k8s.deployment.uid",
-                value.to_owned(),
+                Arc::clone(value),
             ));
         }
         flatten_annotations!(
@@ -899,13 +946,13 @@ impl Traceable for FlowSpan {
         if let Some(ref value) = self.attributes.destination_k8s_replicaset_name {
             kvs.push(KeyValue::new(
                 "destination.k8s.replicaset.name",
-                value.to_owned(),
+                Arc::clone(value),
             ));
         }
         if let Some(ref value) = self.attributes.destination_k8s_replicaset_uid {
             kvs.push(KeyValue::new(
                 "destination.k8s.replicaset.uid",
-                value.to_owned(),
+                Arc::clone(value),
             ));
         }
         flatten_annotations!(
@@ -915,13 +962,13 @@ impl Traceable for FlowSpan {
         if let Some(ref value) = self.attributes.destination_k8s_statefulset_name {
             kvs.push(KeyValue::new(
                 "destination.k8s.statefulset.name",
-                value.to_owned(),
+                Arc::clone(value),
             ));
         }
         if let Some(ref value) = self.attributes.destination_k8s_statefulset_uid {
             kvs.push(KeyValue::new(
                 "destination.k8s.statefulset.uid",
-                value.to_owned(),
+                Arc::clone(value),
             ));
         }
         flatten_annotations!(
@@ -931,13 +978,13 @@ impl Traceable for FlowSpan {
         if let Some(ref value) = self.attributes.destination_k8s_daemonset_name {
             kvs.push(KeyValue::new(
                 "destination.k8s.daemonset.name",
-                value.to_owned(),
+                Arc::clone(value),
             ));
         }
         if let Some(ref value) = self.attributes.destination_k8s_daemonset_uid {
             kvs.push(KeyValue::new(
                 "destination.k8s.daemonset.uid",
-                value.to_owned(),
+                Arc::clone(value),
             ));
         }
         flatten_annotations!(
@@ -945,10 +992,10 @@ impl Traceable for FlowSpan {
             self.attributes.destination_k8s_job_annotations
         );
         if let Some(ref value) = self.attributes.destination_k8s_job_name {
-            kvs.push(KeyValue::new("destination.k8s.job.name", value.to_owned()));
+            kvs.push(KeyValue::new("destination.k8s.job.name", Arc::clone(value)));
         }
         if let Some(ref value) = self.attributes.destination_k8s_job_uid {
-            kvs.push(KeyValue::new("destination.k8s.job.uid", value.to_owned()));
+            kvs.push(KeyValue::new("destination.k8s.job.uid", Arc::clone(value)));
         }
         flatten_annotations!(
             "destination.k8s.cronjob.annotations",
@@ -957,13 +1004,13 @@ impl Traceable for FlowSpan {
         if let Some(ref value) = self.attributes.destination_k8s_cronjob_name {
             kvs.push(KeyValue::new(
                 "destination.k8s.cronjob.name",
-                value.to_owned(),
+                Arc::clone(value),
             ));
         }
         if let Some(ref value) = self.attributes.destination_k8s_cronjob_uid {
             kvs.push(KeyValue::new(
                 "destination.k8s.cronjob.uid",
-                value.to_owned(),
+                Arc::clone(value),
             ));
         }
         flatten_annotations!(
@@ -973,13 +1020,13 @@ impl Traceable for FlowSpan {
         if let Some(ref value) = self.attributes.destination_k8s_service_name {
             kvs.push(KeyValue::new(
                 "destination.k8s.service.name",
-                value.to_owned(),
+                Arc::clone(value),
             ));
         }
         if let Some(ref value) = self.attributes.destination_k8s_service_uid {
             kvs.push(KeyValue::new(
                 "destination.k8s.service.uid",
-                value.to_owned(),
+                Arc::clone(value),
             ));
         }
         if let Some(ref value) = self.attributes.network_policies_ingress {
@@ -992,27 +1039,27 @@ impl Traceable for FlowSpan {
             kvs.push(KeyValue::new("process.pid", value as i64));
         }
         if let Some(ref value) = self.attributes.process_executable_name {
-            kvs.push(KeyValue::new("process.executable.name", value.to_owned()));
+            kvs.push(KeyValue::new("process.executable.name", Arc::clone(value)));
         }
         if let Some(ref value) = self.attributes.source_container_name {
-            kvs.push(KeyValue::new("source.container.name", value.to_owned()));
+            kvs.push(KeyValue::new("source.container.name", Arc::clone(value)));
         }
         if let Some(ref value) = self.attributes.source_container_image_name {
             kvs.push(KeyValue::new(
                 "source.container.image.name",
-                value.to_owned(),
+                Arc::clone(value),
             ));
         }
         if let Some(ref value) = self.attributes.destination_container_name {
             kvs.push(KeyValue::new(
                 "destination.container.name",
-                value.to_owned(),
+                Arc::clone(value),
             ));
         }
         if let Some(ref value) = self.attributes.destination_container_image_name {
             kvs.push(KeyValue::new(
                 "destination.container.image.name",
-                value.to_owned(),
+                Arc::clone(value),
             ));
         }
         span.set_attributes(kvs);
@@ -1100,19 +1147,6 @@ where
 {
     match trace_id {
         Some(id) => serializer.serialize_str(&id.to_string()),
-        None => serializer.serialize_none(),
-    }
-}
-
-fn serialize_option_mac_addr<S>(
-    mac_addr: &Option<pnet::datalink::MacAddr>,
-    serializer: S,
-) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    match mac_addr {
-        Some(addr) => serializer.serialize_str(&addr.to_string()),
         None => serializer.serialize_none(),
     }
 }
@@ -1302,7 +1336,7 @@ mod tests {
         flow_span.attrs_mut().network_transport = IpProto::Tcp;
 
         let name = flow_span.name();
-        assert_eq!(name, Some("flow_ipv4_tcp".to_string()));
+        assert_eq!(name.as_deref(), Some("flow_ipv4_tcp"));
     }
 
     #[test]
@@ -1327,7 +1361,7 @@ mod tests {
         flow_span.attrs_mut().network_transport = IpProto::Udp;
 
         let name = flow_span.name();
-        assert_eq!(name, Some("flow_ipv6_udp".to_string()));
+        assert_eq!(name.as_deref(), Some("flow_ipv6_udp"));
     }
 
     #[test]
@@ -1544,18 +1578,18 @@ mod tests {
     #[test]
     fn test_span_attributes_with_k8s_metadata() {
         let mut attrs = SpanAttributes::default();
-        attrs.source_k8s_pod_name = Some("test-pod".to_string());
-        attrs.source_k8s_namespace_name = Some("test-namespace".to_string());
-        attrs.destination_k8s_service_name = Some("test-service".to_string());
+        attrs.source_k8s_pod_name = Some(Arc::from("test-pod"));
+        attrs.source_k8s_namespace_name = Some(Arc::from("test-namespace"));
+        attrs.destination_k8s_service_name = Some(Arc::from("test-service"));
 
-        assert_eq!(attrs.source_k8s_pod_name, Some("test-pod".to_string()));
+        assert_eq!(attrs.source_k8s_pod_name.as_deref(), Some("test-pod"));
         assert_eq!(
-            attrs.source_k8s_namespace_name,
-            Some("test-namespace".to_string())
+            attrs.source_k8s_namespace_name.as_deref(),
+            Some("test-namespace")
         );
         assert_eq!(
-            attrs.destination_k8s_service_name,
-            Some("test-service".to_string())
+            attrs.destination_k8s_service_name.as_deref(),
+            Some("test-service")
         );
     }
 
@@ -1604,17 +1638,15 @@ mod tests {
 
     #[test]
     fn test_serialize_option_mac_addr() {
-        use pnet::datalink::MacAddr;
         use serde_json;
 
         #[derive(Serialize)]
         struct TestStruct {
-            #[serde(serialize_with = "serialize_option_mac_addr")]
-            mac: Option<MacAddr>,
+            mac: Option<Arc<str>>,
         }
 
         let test = TestStruct {
-            mac: Some(MacAddr::new(0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff)),
+            mac: Some(Arc::from("aa:bb:cc:dd:ee:ff")),
         };
 
         let json = serde_json::to_string(&test).unwrap();
