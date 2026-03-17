@@ -93,24 +93,39 @@ impl FlowSpanComponents {
         let flow_span_tx = self.flow_span_tx.clone();
 
         let flush_future = async {
-            let flow_keys: Vec<Arc<str>> =
-                flow_store.iter().map(|entry| entry.key().clone()).collect();
-            let total_flows = flow_keys.len();
+            // Iterate DashMap's internal shards directly. Each shard's read lock is held
+            // only for the key-collection phase of that shard, then released before any
+            // async processing. One future is spawned per flow.
+            let mut flush_futures = Vec::new();
+            for shard in flow_store.shards() {
+                let keys: Vec<Arc<str>> = {
+                    let guard = shard.read();
+                    // SAFETY: we hold the read lock, which prevents concurrent writes
+                    // and any reallocation of the underlying RawTable.
+                    unsafe { guard.iter().map(|b| b.as_ref().0.clone()).collect() }
+                };
+                for id in keys {
+                    let flow_store = Arc::clone(&flow_store);
+                    let flow_stats_map = Arc::clone(&flow_stats_map);
+                    let flow_span_tx = flow_span_tx.clone();
+                    flush_futures.push(async move {
+                        let metrics = PollerMetrics::new();
+                        timeout_and_remove_flow(
+                            id,
+                            &flow_store,
+                            &flow_stats_map,
+                            &flow_span_tx,
+                            &metrics,
+                        )
+                        .await;
+                    });
+                }
+            }
 
+            let total_flows = flush_futures.len();
             if total_flows == 0 {
                 return Ok::<usize, usize>(0);
             }
-
-            let poller_metrics = PollerMetrics::new();
-            let flush_futures = flow_keys.into_iter().map(|id| {
-                timeout_and_remove_flow(
-                    id,
-                    &flow_store,
-                    &flow_stats_map,
-                    &flow_span_tx,
-                    &poller_metrics,
-                )
-            });
 
             futures::future::join_all(flush_futures).await;
 
@@ -156,14 +171,33 @@ impl FlowSpanProducer {
         listening_ports_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, ListeningPortKey, u8>>>,
         conf: &Conf,
     ) -> Result<Self, BootTimeError> {
-        // Derive producer_store_capacity from flow_capture.flow_stats_capacity
-        //
-        // The userspace flow store tracks the same flows as FLOW_STATS (eBPF).
-        // We derive the initial capacity as flow_stats_capacity / 3 to balance memory usage and performance.
+        // Derive producer_store_capacity from flow_capture.flow_stats_capacity.
         let producer_store_capacity = (conf.pipeline.flow_capture.flow_stats_capacity / 3) as usize;
-        let flow_store = Arc::new(DashMap::with_capacity_and_hasher(
+
+        // Use DashMap's native sharding for poller locality.
+        //
+        // `shard_amount` determines both how many DashMap internal shards exist and how many
+        // pollers are spawned (one poller per shard). Each poller iterates only its assigned
+        // shard, so it processes F/N entries per tick instead of all F entries.
+        //
+        // We derive the count from `available_parallelism()` rather than `num_cpus::get()` so
+        // the value is correct in containerised environments where a CPU quota (cgroup) limits
+        // effective parallelism to fewer cores than the host advertises.
+        //
+        // DashMap requires shard_amount to be a power of two.
+        let parallelism = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(workers);
+        // Cap at 64: each shard spawns a poller task and allocates RwLock overhead.
+        // Beyond ~64 shards the diminishing returns don't justify the extra tasks.
+        // available_parallelism() is already quota-aware, so this only triggers on
+        // large bare-metal hosts running without a CPU limit.
+        let shard_amount = parallelism.next_power_of_two().clamp(2, 64);
+
+        let flow_store = Arc::new(DashMap::with_capacity_and_hasher_and_shard_amount(
             producer_store_capacity,
             FxBuildHasher::default(),
+            shard_amount,
         ));
         let community_id_generator = CommunityIdGenerator::new(span_opts.community_id_seed);
         let id_generator: Arc<dyn IdGenerator + Send + Sync> =
@@ -291,7 +325,8 @@ impl FlowSpanProducer {
             }
         });
 
-        let num_pollers = self.workers.clamp(1, 32);
+        // num_pollers == shard_amount: each poller owns exactly one DashMap internal shard.
+        let num_pollers = components.flow_store.shards().len();
         let max_record_interval = self.span_opts.max_record_interval;
         let poll_interval = self.flow_store_poll_interval;
         for poller_id in 0..num_pollers {
@@ -302,7 +337,6 @@ impl FlowSpanProducer {
 
             let poller = FlowPoller {
                 id: poller_id,
-                num_pollers,
                 flow_store: poller_flow_store,
                 flow_stats_map: poller_stats_map,
                 flow_span_tx: poller_span_tx,
@@ -942,10 +976,17 @@ impl FlowWorker {
                 flow_reverse_ip_flow_label: is_ipv6.then_some(stats.reverse_ip_flow_label),
 
                 flow_tcp_flags_bits: is_tcp.then_some(stats.tcp_flags),
-                flow_tcp_flags_tags: is_tcp.then(|| TcpFlags::flags_from_bits(stats.tcp_flags)),
+                flow_tcp_flags_tags: is_tcp.then(|| {
+                    TcpFlags::flags_from_bits(stats.tcp_flags)
+                        .into_iter()
+                        .collect()
+                }),
                 flow_reverse_tcp_flags_bits: is_tcp.then_some(stats.reverse_tcp_flags),
-                flow_reverse_tcp_flags_tags: is_tcp
-                    .then(|| TcpFlags::flags_from_bits(stats.reverse_tcp_flags)),
+                flow_reverse_tcp_flags_tags: is_tcp.then(|| {
+                    TcpFlags::flags_from_bits(stats.reverse_tcp_flags)
+                        .into_iter()
+                        .collect()
+                }),
                 flow_tcp_handshake_latency: (is_tcp
                     && stats.tcp_syn_ns != 0
                     && stats.tcp_syn_ack_ns != 0)
@@ -1228,11 +1269,14 @@ impl PollerMetrics {
     }
 }
 
-/// Individual poller task - handles flows hashed to this poller.
-/// Polls at configured interval to check for record intervals and timeouts.
+/// Individual poller task - iterates one DashMap internal shard exclusively.
+///
+/// Each poller holds the full [`FlowStore`] (`Arc<DashMap>`) but only reads
+/// `shards()[self.id]`, which contains exactly the keys whose hash maps to that shard.
+/// Workers insert via `flow_store.insert()` and DashMap routes to the correct shard
+/// automatically — no partition check or separate data structure is needed.
 struct FlowPoller {
     id: usize,
-    num_pollers: usize,
     flow_store: FlowStore,
     flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
     flow_span_tx: mpsc::Sender<FlowSpan>,
@@ -1250,7 +1294,6 @@ impl FlowPoller {
         debug!(
             event.name = "flow_poller.started",
             poller.id = self.id,
-            poller.total = self.num_pollers,
             "flow poller started"
         );
 
@@ -1262,13 +1305,12 @@ impl FlowPoller {
                 _ = self.shutdown_rx.recv() => {
                     debug!(event.name = "flow_poller.final_flush", poller.id = self.id, "performing final flush of remaining flows");
 
-                    let mut flows_to_flush = Vec::new();
-                    for entry in self.flow_store.iter() {
-                        let community_id = entry.key().clone();
-                        if hash_string(&community_id) % self.num_pollers == self.id {
-                            flows_to_flush.push(community_id);
-                        }
-                    }
+                    let flows_to_flush: Vec<Arc<str>> = {
+                        let guard = self.flow_store.shards()[self.id].read();
+                        // SAFETY: we hold the read lock, which prevents concurrent writes
+                        // and any reallocation of the underlying RawTable.
+                        unsafe { guard.iter().map(|b| b.as_ref().0.clone()).collect() }
+                    };
 
                     for community_id in flows_to_flush {
                         timeout_and_remove_flow(
@@ -1289,43 +1331,42 @@ impl FlowPoller {
                 let mut flows_to_remove = Vec::new();
                 let mut flows_checked = 0usize;
                 let mut flows_recorded = 0usize;
-                let mut flows_skipped_partition = 0usize;
 
-                // Must collect IDs first, then drop iterator before calling
-                // record_flow/timeout_and_remove_flow to avoid iterator deadlock
+                // Collect from this poller's shard only. The read lock is held only
+                // during the collection phase and dropped before any async processing.
                 let mut flows_to_record = Vec::new();
 
                 let collection_start = std::time::Instant::now();
-                for entry in self.flow_store.iter() {
-                    let community_id = entry.key().clone();
+                {
+                    let shard = self.flow_store.shards()[self.id].read();
+                    // SAFETY: we hold the read lock, which prevents concurrent writes
+                    // and any reallocation of the underlying RawTable.
+                    unsafe {
+                        for bucket in shard.iter() {
+                            let (community_id, shared_entry) = bucket.as_ref();
+                            let flow_span = &shared_entry.get().flow_span;
+                            let last_recorded_time = flow_span.last_recorded_time;
+                            let last_activity_time = flow_span.last_activity_time;
+                            let timeout_duration = flow_span.timeout_duration;
 
-                    // Partition: only process flows hashed to this poller
-                    if hash_string(&community_id) % self.num_pollers != self.id {
-                        flows_skipped_partition += 1;
-                        continue;
+                            flows_checked += 1;
+
+                            // Check if record interval elapsed
+                            if let Ok(elapsed) = now.duration_since(last_recorded_time)
+                                && elapsed >= self.max_record_interval
+                            {
+                                flows_to_record.push(community_id.clone());
+                            }
+
+                            // Check if timeout elapsed
+                            if let Ok(elapsed) = now.duration_since(last_activity_time)
+                                && elapsed >= timeout_duration
+                            {
+                                flows_to_remove.push(community_id.clone());
+                            }
+                        }
                     }
-
-                    // Extract all needed data from entry
-                    let flow_span = &entry.flow_span;
-                    let last_recorded_time = flow_span.last_recorded_time;
-                    let last_activity_time = flow_span.last_activity_time;
-                    let timeout_duration = flow_span.timeout_duration;
-
-                    flows_checked += 1;
-
-                    // Check if record interval elapsed
-                    if let Ok(elapsed) = now.duration_since(last_recorded_time)
-                        && elapsed >= self.max_record_interval
-                    {
-                        flows_to_record.push(community_id.clone());
-                    }
-
-                    // Check if timeout elapsed
-                    if let Ok(elapsed) = now.duration_since(last_activity_time)
-                        && elapsed >= timeout_duration
-                    {
-                        flows_to_remove.push(community_id.clone());
-                    }
+                    // shard read lock released here — before any async processing
                 }
                 let collection_duration = collection_start.elapsed();
 
@@ -1382,7 +1423,6 @@ impl FlowPoller {
                         flows.checked = flows_checked,
                         flows.recorded = flows_recorded,
                         flows.timed_out = flows_to_remove.len(),
-                        flows.skipped_partition = flows_skipped_partition,
                         tick.duration_ms = tick_duration.as_millis(),
                         collection.duration_ms = collection_duration.as_millis(),
                         record.duration_ms = record_duration.as_millis(),
@@ -1480,13 +1520,6 @@ fn icmp_code_name(
 }
 
 /// Hash a string for flow partitioning across pollers
-fn hash_string(s: &str) -> usize {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = fxhash::FxHasher::default();
-    s.hash(&mut hasher);
-    hasher.finish() as usize
-}
-
 /// Record a flow span by reading from eBPF map, updating counters, and sending to exporter.
 /// Returns true if the flow should continue being tracked, false if export channel is closed.
 async fn record_flow(
@@ -1503,6 +1536,7 @@ async fn record_flow(
         last_recorded_bytes,
         last_recorded_reverse_packets,
         last_recorded_reverse_bytes,
+        interface_name_for_metrics,
     ) = {
         let entry_ref = match flow_store.get(community_id) {
             Some(entry) => entry,
@@ -1522,6 +1556,12 @@ async fn record_flow(
             }
         };
 
+        let iface: Arc<str> = flow_span
+            .attributes
+            .network_interface_name
+            .clone()
+            .unwrap_or_else(|| Arc::from("unknown"));
+
         (
             flow_key,
             flow_span.boot_time_offset,
@@ -1529,6 +1569,7 @@ async fn record_flow(
             flow_span.last_recorded_bytes,
             flow_span.last_recorded_reverse_packets,
             flow_span.last_recorded_reverse_bytes,
+            iface,
         )
     };
 
@@ -1620,16 +1661,14 @@ async fn record_flow(
     }
 
     if delta_packets > 0 || delta_reverse_packets > 0 {
-        let interface_name_arc = flow_store
-            .get(community_id)
-            .and_then(|entry| entry.flow_span.attributes.network_interface_name.clone());
-        let interface_name_for_metrics = interface_name_arc.as_deref().unwrap_or("unknown");
-
         if delta_packets > 0 {
             metrics::registry::PACKETS_TOTAL.inc_by(delta_packets);
             if metrics::registry::debug_enabled() {
                 metrics::registry::PACKETS_BY_INTERFACE_TOTAL
-                    .with_label_values(&[interface_name_for_metrics, stats.direction.as_str()])
+                    .with_label_values(&[
+                        interface_name_for_metrics.as_ref(),
+                        stats.direction.as_str(),
+                    ])
                     .inc_by(delta_packets);
             }
         }
@@ -1637,7 +1676,10 @@ async fn record_flow(
             metrics::registry::BYTES_TOTAL.inc_by(delta_bytes);
             if metrics::registry::debug_enabled() {
                 metrics::registry::BYTES_BY_INTERFACE_TOTAL
-                    .with_label_values(&[interface_name_for_metrics, stats.direction.as_str()])
+                    .with_label_values(&[
+                        interface_name_for_metrics.as_ref(),
+                        stats.direction.as_str(),
+                    ])
                     .inc_by(delta_bytes);
             }
         }
@@ -1646,7 +1688,10 @@ async fn record_flow(
             metrics::registry::PACKETS_TOTAL.inc_by(delta_reverse_packets);
             if metrics::registry::debug_enabled() {
                 metrics::registry::PACKETS_BY_INTERFACE_TOTAL
-                    .with_label_values(&[interface_name_for_metrics, reverse_direction.as_str()])
+                    .with_label_values(&[
+                        interface_name_for_metrics.as_ref(),
+                        reverse_direction.as_str(),
+                    ])
                     .inc_by(delta_reverse_packets);
             }
         }
@@ -1655,7 +1700,10 @@ async fn record_flow(
             metrics::registry::BYTES_TOTAL.inc_by(delta_reverse_bytes);
             if metrics::registry::debug_enabled() {
                 metrics::registry::BYTES_BY_INTERFACE_TOTAL
-                    .with_label_values(&[interface_name_for_metrics, reverse_direction.as_str()])
+                    .with_label_values(&[
+                        interface_name_for_metrics.as_ref(),
+                        reverse_direction.as_str(),
+                    ])
                     .inc_by(delta_reverse_bytes);
             }
         }
@@ -2291,9 +2339,10 @@ mod tests {
     fn create_test_worker_for_timeout() -> FlowWorker {
         let span_opts = SpanOptions::default();
         let (_flow_event_tx, flow_event_rx) = mpsc::channel::<FlowEvent>(100);
-        let flow_store = Arc::new(DashMap::with_capacity_and_hasher(
+        let flow_store = Arc::new(DashMap::with_capacity_and_hasher_and_shard_amount(
             100,
             FxBuildHasher::default(),
+            2,
         ));
         let community_id_generator = CommunityIdGenerator::new(span_opts.community_id_seed);
         let id_generator: Arc<dyn IdGenerator + Send + Sync> =

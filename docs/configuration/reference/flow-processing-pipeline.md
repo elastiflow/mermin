@@ -62,7 +62,9 @@ Configures userspace flow processing.
 
 - `workers` attribute
 
-  Number of parallel worker threads for flow processing. Each worker processes eBPF events from its own queue independently.
+  Number of parallel worker threads that process eBPF flow events. Each worker has its own queue with depth `worker_queue_capacity`.
+  Workers handle event ingestion only —
+  flow table polling and timeout handling are done by a separate set of poller tasks whose count is set automatically based on the CPU resources available to the process (respecting CPU limits in containerised environments).
 
   **Type:** Integer
 
@@ -104,7 +106,8 @@ Configures userspace flow processing.
 
 - `flow_store_poll_interval` attribute
 
-  How often workers scan the flow table to emit periodic flow records and expire idle flows. Lower values give more responsive timeout detection at slightly higher CPU cost.
+  How often pollers scan the flow table to emit periodic flow records and expire idle flows. Lower values give more responsive timeout detection at slightly higher CPU cost.
+  The number of pollers is set automatically based on available CPU resources and is independent of `workers`.
 
   **Type:** String (duration)
 

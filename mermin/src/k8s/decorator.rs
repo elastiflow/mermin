@@ -6,7 +6,11 @@
 //! - Support for Pods, Nodes, key workload types (Deployments, StatefulSets, etc.).
 //! - Network-related resources like Services, Ingresses and NetworkPolicies.
 
-use std::{collections::HashMap, net::IpAddr, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    net::IpAddr,
+    sync::Arc,
+};
 
 use k8s_openapi::api::core::v1::Pod;
 use tracing::debug;
@@ -26,12 +30,41 @@ pub struct NetworkPolicy {
     pub policy: K8sObjectMeta,
 }
 
+/// Expand a list of extract rules into a compiled lookup structure.
+///
+/// Returns `(specific, wildcards)`:
+/// - `specific`: fully-qualified `"resource.metadata.field"` keys (e.g. `"pod.metadata.name"`)
+///   for rules that name a concrete resource type.
+/// - `wildcards`: bare field names (e.g. `"name"`) extracted from `[*].metadata.<field>` rules.
+///   A wildcard entry matches *any* resource kind, preserving the original `[*]` semantics.
+///
+/// Both lookups are O(1) at runtime with no allocation in `should_extract`.
+fn expand_extract_rules(rules: Vec<String>) -> (HashSet<String>, HashSet<String>) {
+    let mut specific = HashSet::with_capacity(rules.len());
+    let mut wildcards = HashSet::new();
+    for rule in rules {
+        if let Some(field) = rule.strip_prefix("[*].metadata.") {
+            wildcards.insert(field.to_owned());
+        } else {
+            specific.insert(rule);
+        }
+    }
+    (specific, wildcards)
+}
+
 /// Kubernetes decoration processor that correlates a FlowSpan with Kubernetes metadata
 /// to produce enriched flow attributes containing resource information.
 pub struct Decorator<'a> {
     attributor: &'a Attributor,
-    source_extract_rules: Vec<String>,
-    dest_extract_rules: Vec<String>,
+    /// Pre-compiled set of `"resource.metadata.field"` keys for source-side extraction.
+    source_extract_set: HashSet<String>,
+    /// Field names matched by source-side `[*].metadata.<field>` wildcard rules.
+    /// A hit here means the field is extracted regardless of resource kind.
+    source_wildcard_fields: HashSet<String>,
+    /// Pre-compiled set of `"resource.metadata.field"` keys for dest-side extraction.
+    dest_extract_set: HashSet<String>,
+    /// Field names matched by dest-side `[*].metadata.<field>` wildcard rules.
+    dest_wildcard_fields: HashSet<String>,
 }
 
 impl<'a> Decorator<'a> {
@@ -40,10 +73,15 @@ impl<'a> Decorator<'a> {
         source_extract_rules: Vec<String>,
         dest_extract_rules: Vec<String>,
     ) -> Self {
+        let (source_extract_set, source_wildcard_fields) =
+            expand_extract_rules(source_extract_rules);
+        let (dest_extract_set, dest_wildcard_fields) = expand_extract_rules(dest_extract_rules);
         Self {
             attributor,
-            source_extract_rules,
-            dest_extract_rules,
+            source_extract_set,
+            source_wildcard_fields,
+            dest_extract_set,
+            dest_wildcard_fields,
         }
     }
 
@@ -72,24 +110,24 @@ impl<'a> Decorator<'a> {
         let src_port = flow_span.attributes.source_port;
         let dst_port = flow_span.attributes.destination_port;
 
-        let src_info = self.enrich(ctx.src_pod.as_ref(), ctx.src_ip).await;
+        let src_info = self.enrich(ctx.src_pod.as_deref(), ctx.src_ip).await;
         if let Some(info) = &src_info {
             self.populate_k8s_attributes(
                 &mut flow_span,
                 info,
                 true,
-                ctx.src_pod.as_ref(),
+                ctx.src_pod.as_deref(),
                 src_port,
             );
         }
 
-        let dst_info = self.enrich(ctx.dst_pod.as_ref(), ctx.dst_ip).await;
+        let dst_info = self.enrich(ctx.dst_pod.as_deref(), ctx.dst_ip).await;
         if let Some(info) = &dst_info {
             self.populate_k8s_attributes(
                 &mut flow_span,
                 info,
                 false,
-                ctx.dst_pod.as_ref(),
+                ctx.dst_pod.as_deref(),
                 dst_port,
             );
         }
@@ -142,26 +180,22 @@ impl<'a> Decorator<'a> {
 
     /// Checks if a specific metadata field should be extracted based on config.
     ///
-    /// generic_kind: "pod", "node", "service", etc.
-    /// field_type: "name", "namespace", "uid", "annotations", "labels"
+    /// `resource`: lowercase resource kind — "pod", "node", "service", etc.
+    /// `field`: metadata field name — "name", "namespace", "uid", "annotations", "labels"
+    ///
+    /// Returns `true` if the operator configured either a concrete `resource.metadata.field`
+    /// rule or a `[*].metadata.field` wildcard that matches any resource kind.
+    ///
+    /// The wildcard check is O(1) with no allocation (uses `field` directly as a `&str` key).
+    /// The specific check allocates one `String` for the key and does a single `HashSet` lookup.
     fn should_extract(&self, resource: &str, field: &str, is_source: bool) -> bool {
-        let rules = if is_source {
-            &self.source_extract_rules
+        let (set, wildcards) = if is_source {
+            (&self.source_extract_set, &self.source_wildcard_fields)
         } else {
-            &self.dest_extract_rules
+            (&self.dest_extract_set, &self.dest_wildcard_fields)
         };
 
-        let specific = format!("{resource}.metadata.{field}");
-        if rules.contains(&specific) {
-            return true;
-        }
-
-        let wildcard = format!("[*].metadata.{field}");
-        if rules.contains(&wildcard) {
-            return true;
-        }
-
-        false
+        wildcards.contains(field) || set.contains(format!("{resource}.metadata.{field}").as_str())
     }
 
     /// Shared helper to populate standard Kubernetes metadata (Name, UID, Annotations, Namespace).
@@ -300,7 +334,7 @@ impl<'a> Decorator<'a> {
         relation: &K8sObjectMeta,
         is_source: bool,
     ) {
-        match relation.kind.to_lowercase().as_str() {
+        match relation.kind_lower.as_str() {
             "networkpolicy" => {
                 self.set_k8s_attr(flow_span, "networkpolicy.name", &relation.name, is_source);
             }

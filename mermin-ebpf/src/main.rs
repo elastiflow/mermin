@@ -363,10 +363,6 @@ pub fn socket_accept(ctx: LsmContext) -> i32 {
 #[inline(always)]
 #[allow(static_mut_refs)]
 fn try_socket_accept(ctx: &LsmContext) -> Result<i32, i64> {
-    let pid_tgid = bpf_get_current_pid_tgid();
-    let pid = (pid_tgid >> 32) as u32;
-    let comm = bpf_get_current_comm().unwrap_or([0u8; 16]);
-
     let args_ptr = ctx.as_ptr() as *const usize;
     let newsock: *const core::ffi::c_void =
         unsafe { *(args_ptr.add(1) as *const *const core::ffi::c_void) };
@@ -389,6 +385,10 @@ fn try_socket_accept(ctx: &LsmContext) -> Result<i32, i64> {
     if family != AF_INET as u16 && family != AF_INET6 as u16 {
         return Ok(0);
     }
+
+    let pid_tgid = bpf_get_current_pid_tgid();
+    let pid = (pid_tgid >> 32) as u32;
+    let comm = bpf_get_current_comm().unwrap_or([0u8; 16]);
 
     let flow_key = if family == AF_INET as u16 {
         match extract_flow_key_from_sock_v4(sk) {
@@ -627,26 +627,20 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
     #[allow(static_mut_refs)]
     let flow_key_ptr = unsafe { FLOW_KEY_SCRATCH.get_ptr_mut(0).ok_or(Error::OutOfBounds)? };
     let flow_key = unsafe { &mut *flow_key_ptr };
-    let eth_type = parse_flow_key(ctx, flow_key)?;
+    let (eth_type, l4_offset) = parse_flow_key(ctx, flow_key)?;
 
     // Normalize the flow key for map lookup (bidirectional aggregation)
     let normalized_key = flow_key.normalize();
     let timestamp = unsafe { bpf_ktime_get_boot_ns() };
 
-    let mut l4_offset = eth::ETH_LEN;
-    if eth_type == EtherType::Ipv4 {
-        let vihl: ipv4::Vihl = ctx.load(l4_offset).map_err(|_| Error::OutOfBounds)?;
-        l4_offset += ipv4::ihl(vihl) as usize;
-    } else if eth_type == EtherType::Ipv6 {
-        l4_offset += ipv6::IPV6_LEN;
-    }
-
     #[allow(static_mut_refs)]
-    let mut stats_ptr = unsafe { FLOW_STATS.get_ptr_mut(&normalized_key) };
+    let stats_ptr = unsafe { FLOW_STATS.get_ptr_mut(&normalized_key) };
 
-    // Track whether this is a new flow so we can send the ring buffer event
-    // AFTER the packet counters have been incremented (avoids a race where
-    // userspace reads 0 packets/bytes from the map).
+    // Defer the ring buffer event for new flows until after packet counters have been
+    // incremented. If we sent the event immediately after FLOW_STATS.insert(), userspace
+    // could read the entry and observe 0 packets/bytes before the counter update below.
+    // Storing the parsed offset here lets us send the event at the bottom of the function,
+    // after the scratch struct is fully populated and inserted.
     let mut new_flow_parsed_offset: Option<usize> = None;
 
     if stats_ptr.is_none() {
@@ -672,9 +666,6 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
         stats.dst_ip = flow_key.dst_ip;
         stats.src_port = flow_key.src_port;
         stats.dst_port = flow_key.dst_port;
-        // Set metadata flags to 0 initially to allow capture during initial flow creation
-        stats.forward_metadata_seen = 0;
-        stats.reverse_metadata_seen = 0;
 
         let parsed_offset = parse_metadata(ctx, stats, l4_offset)?;
 
@@ -683,6 +674,23 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
         // so the packet is in forward direction relative to the normalized key
         capture_direction_metadata(ctx, stats, eth_type, l4_offset, true)?;
         stats.forward_metadata_seen = 1;
+        stats.reverse_metadata_seen = 0;
+
+        stats.packets += 1;
+        stats.bytes = stats.bytes.saturating_add(ctx.len() as u64);
+
+        if stats.protocol == IpProto::Tcp {
+            let current_flags: tcp::Flags = ctx
+                .load(l4_offset + tcp::TCP_FLAGS_OFFSET)
+                .map_err(|_| Error::OutOfBounds)?;
+            stats.tcp_flags |= current_flags;
+            stats.tcp_state = determine_tcp_state(stats.tcp_state, current_flags, direction);
+            if stats.forward_tcp_flags == 0 {
+                stats.forward_tcp_flags = current_flags;
+            }
+            let has_payload = ctx.len() > parsed_offset as u32;
+            update_tcp_timing(stats, true, has_payload, current_flags, timestamp);
+        }
 
         unsafe {
             #[allow(static_mut_refs)]
@@ -691,19 +699,23 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
                 .map_err(|_| Error::OutOfBounds)?;
         }
 
-        // Defer ring buffer event until after counters are incremented below
+        // stats_ptr intentionally left as None — the existing-flow update block below
+        // is skipped for new flows since all updates are already applied above.
         new_flow_parsed_offset = Some(parsed_offset);
-
-        stats_ptr = unsafe { FLOW_STATS.get_ptr_mut(&normalized_key) };
     }
 
-    // Update stats for current packet (works for both new and existing flows)
+    // Update stats for current packet — existing flows only (stats_ptr is Some).
+    // New flows have already applied their counter and TCP updates above.
     #[allow(static_mut_refs)]
     if let Some(s_ptr) = stats_ptr {
         let stats = unsafe { &mut *s_ptr };
         stats.last_seen_ns = timestamp;
 
-        let is_forward = flow_key.src_ip == stats.src_ip && flow_key.dst_ip == stats.dst_ip;
+        // Determine packet direction relative to the creating packet.
+        // stats.src_ip holds the creating packet's source IP. Comparing src alone
+        // is sufficient — if src matches we're going in the same direction, and
+        // if src doesn't match then src must equal stats.dst_ip (reverse direction).
+        let is_forward = flow_key.src_ip == stats.src_ip;
         if is_forward {
             stats.packets += 1;
             stats.bytes = stats.bytes.saturating_add(ctx.len() as u64);
@@ -806,9 +818,13 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
 /// - Layer 3: IPv4/IPv6 (addresses, protocol)
 /// - Layer 4: TCP/UDP ports or ICMP type/code
 ///
+/// Returns `(eth_type, l4_offset)` where `l4_offset` is the byte offset of the
+/// L4 header within the packet (i.e. past Ethernet + IP headers). Returning this
+/// avoids the duplicate IHL read that `try_flow_stats` would otherwise need.
+///
 /// This function uses bounded loops to satisfy old kernel verifiers (5.14+).
 #[inline(always)]
-fn parse_flow_key(ctx: &TcContext, key: &mut FlowKey) -> Result<EtherType, Error> {
+fn parse_flow_key(ctx: &TcContext, key: &mut FlowKey) -> Result<(EtherType, usize), Error> {
     if eth::ETH_LEN > ctx.len() as usize {
         return Err(Error::MalformedHeader);
     }
@@ -928,7 +944,7 @@ fn parse_flow_key(ctx: &TcContext, key: &mut FlowKey) -> Result<EtherType, Error
         }
     }
 
-    Ok(eth_type)
+    Ok((eth_type, offset))
 }
 
 /// Capture metadata (DSCP, ECN, TTL, flow label, ICMP type/code) for a specific direction.
@@ -1609,11 +1625,10 @@ mod tests {
         let ctx = TcContext::new(pkt);
         let mut flow_key = FlowKey::default();
         let result = parse_flow_key(&ctx, &mut flow_key);
-        let ether_type = result.unwrap();
+        let (ether_type, _l4_offset) = result.unwrap();
         let expected_src = [192, 168, 1, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         let expected_dst = [10, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
-        assert!(result.is_ok());
         assert_eq!(ether_type, EtherType::Ipv4);
         assert_eq!(flow_key.ip_version, IpVersion::V4);
         assert_eq!(flow_key.protocol, IpProto::Tcp);
@@ -1628,10 +1643,8 @@ mod tests {
         let pkt = build_ipv4_udp_packet();
         let ctx = TcContext::new(pkt);
         let mut flow_key = FlowKey::default();
-        let result = parse_flow_key(&ctx, &mut flow_key);
-        let ether_type = result.unwrap();
+        let (ether_type, _l4_offset) = parse_flow_key(&ctx, &mut flow_key).unwrap();
 
-        assert!(result.is_ok());
         assert_eq!(ether_type, EtherType::Ipv4);
         assert_eq!(flow_key.protocol, IpProto::Udp);
         assert_eq!(flow_key.src_port, 1234);
@@ -1643,10 +1656,8 @@ mod tests {
         let pkt = build_ipv4_icmp_packet();
         let ctx = TcContext::new(pkt);
         let mut flow_key = FlowKey::default();
-        let result = parse_flow_key(&ctx, &mut flow_key);
-        let ether_type = result.unwrap();
+        let (ether_type, _l4_offset) = parse_flow_key(&ctx, &mut flow_key).unwrap();
 
-        assert!(result.is_ok());
         assert_eq!(ether_type, EtherType::Ipv4);
         assert_eq!(flow_key.protocol, IpProto::Icmp);
         assert_eq!(flow_key.src_port, 8);
@@ -1658,10 +1669,8 @@ mod tests {
         let pkt = build_ipv6_tcp_packet();
         let ctx = TcContext::new(pkt);
         let mut flow_key = FlowKey::default();
-        let result = parse_flow_key(&ctx, &mut flow_key);
-        let ether_type = result.unwrap();
+        let (ether_type, _l4_offset) = parse_flow_key(&ctx, &mut flow_key).unwrap();
 
-        assert!(result.is_ok());
         assert_eq!(ether_type, EtherType::Ipv6);
         assert_eq!(flow_key.ip_version, IpVersion::V6);
         assert_eq!(flow_key.protocol, IpProto::Tcp);
@@ -1730,16 +1739,8 @@ mod tests {
         let pkt = build_ipv4_tcp_packet();
         let ctx = TcContext::new(pkt);
         let mut flow_key = FlowKey::default();
-        let ether_type = parse_flow_key(&ctx, &mut flow_key).unwrap();
+        let (ether_type, l4_offset) = parse_flow_key(&ctx, &mut flow_key).unwrap();
         let mut stats = create_test_flow_stats(ether_type, flow_key.protocol);
-
-        let mut l4_offset = eth::ETH_LEN;
-        if ether_type == EtherType::Ipv4 {
-            let vihl: ipv4::Vihl = ctx.load(l4_offset).unwrap();
-            l4_offset += ipv4::ihl(vihl) as usize;
-        } else {
-            l4_offset += ipv6::IPV6_LEN;
-        }
 
         let result = parse_metadata(&ctx, &mut stats, l4_offset);
         let parsed_offset = result.unwrap();
@@ -1760,16 +1761,8 @@ mod tests {
         let pkt = build_ipv6_tcp_packet();
         let ctx = TcContext::new(pkt);
         let mut flow_key = FlowKey::default();
-        let ether_type = parse_flow_key(&ctx, &mut flow_key).unwrap();
+        let (ether_type, l4_offset) = parse_flow_key(&ctx, &mut flow_key).unwrap();
         let mut stats = create_test_flow_stats(ether_type, flow_key.protocol);
-
-        let mut l4_offset = eth::ETH_LEN;
-        if ether_type == EtherType::Ipv4 {
-            let vihl: ipv4::Vihl = ctx.load(l4_offset).unwrap();
-            l4_offset += ipv4::ihl(vihl) as usize;
-        } else {
-            l4_offset += ipv6::IPV6_LEN;
-        }
 
         let result = parse_metadata(&ctx, &mut stats, l4_offset);
         let parsed_offset = result.unwrap();
@@ -1790,16 +1783,8 @@ mod tests {
         let pkt = build_ipv4_udp_packet();
         let ctx = TcContext::new(pkt);
         let mut flow_key = FlowKey::default();
-        let ether_type = parse_flow_key(&ctx, &mut flow_key).unwrap();
+        let (ether_type, l4_offset) = parse_flow_key(&ctx, &mut flow_key).unwrap();
         let mut stats = create_test_flow_stats(ether_type, flow_key.protocol);
-
-        let mut l4_offset = eth::ETH_LEN;
-        if ether_type == EtherType::Ipv4 {
-            let vihl: ipv4::Vihl = ctx.load(l4_offset).unwrap();
-            l4_offset += ipv4::ihl(vihl) as usize;
-        } else {
-            l4_offset += ipv6::IPV6_LEN;
-        }
 
         let result = parse_metadata(&ctx, &mut stats, l4_offset);
         let parsed_offset = result.unwrap();
@@ -1816,14 +1801,8 @@ mod tests {
         let pkt = build_ipv4_icmp_packet();
         let ctx = TcContext::new(pkt);
         let mut flow_key = FlowKey::default();
-        let ether_type = parse_flow_key(&ctx, &mut flow_key).unwrap();
+        let (ether_type, l4_offset) = parse_flow_key(&ctx, &mut flow_key).unwrap();
         let mut stats = create_test_flow_stats(ether_type, flow_key.protocol);
-
-        let mut l4_offset = eth::ETH_LEN;
-        if ether_type == EtherType::Ipv4 {
-            let vihl: ipv4::Vihl = ctx.load(l4_offset).map_err(|_| Error::OutOfBounds).unwrap();
-            l4_offset += ipv4::ihl(vihl) as usize;
-        }
 
         let result = parse_metadata(&ctx, &mut stats, l4_offset);
         let parsed_offset = result.unwrap();
@@ -1860,19 +1839,12 @@ mod tests {
 
         let ctx = TcContext::new(pkt);
         let mut flow_key = FlowKey::default();
-        let ether_type = parse_flow_key(&ctx, &mut flow_key).unwrap();
+        let (ether_type, l4_offset) = parse_flow_key(&ctx, &mut flow_key).unwrap();
         let mut stats = create_test_flow_stats(ether_type, flow_key.protocol);
-
-        let mut l4_offset = eth::ETH_LEN;
-        if ether_type == EtherType::Ipv4 {
-            let vihl: ipv4::Vihl = ctx.load(l4_offset).map_err(|_| Error::OutOfBounds).unwrap();
-            l4_offset += ipv4::ihl(vihl) as usize;
-        }
 
         let result = parse_metadata(&ctx, &mut stats, l4_offset);
         let parsed_offset = result.unwrap();
 
-        assert!(result.is_ok());
         assert_eq!(parsed_offset, 66);
     }
 

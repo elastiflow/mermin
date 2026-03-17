@@ -242,8 +242,7 @@ impl FlowKey {
 
     /// Normalize this flow key for bidirectional flow aggregation.
     ///
-    /// Returns `normalized_key`.
-    /// The normalized key ensures both directions of a flow (A→B and B→A) map to the same key,
+    /// Both directions of a flow (A→B and B→A) map to the same key,
     /// with the "lower" endpoint always appearing as src.
     ///
     /// Per Community ID spec: https://github.com/corelight/community-id-spec
@@ -276,9 +275,7 @@ impl FlowKey {
     /// ```
     #[inline(always)]
     pub fn normalize(self) -> FlowKey {
-        let needs_swap = self.should_normalize();
-
-        if !needs_swap {
+        if !self.should_normalize() {
             return self;
         }
 

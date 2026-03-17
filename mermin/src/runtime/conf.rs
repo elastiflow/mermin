@@ -834,7 +834,12 @@ impl FlowCapture {
 pub struct FlowProducer {
     /// Number of flow worker threads for packet processing (default: 4)
     ///
+    /// Controls how many [`FlowWorker`] tasks are spawned to process eBPF events concurrently.
     /// Each worker processes events from its own queue with capacity `worker_queue_capacity`.
+    ///
+    /// **Note**: the number of pollers and the flow-store shard count are derived independently
+    /// from `std::thread::available_parallelism()` at runtime so they reflect the effective CPU
+    /// quota in containerised environments. Changing `workers` does not affect shard count.
     pub workers: usize,
 
     /// Capacity for each worker thread's queue (default: 1024)
@@ -848,7 +853,7 @@ pub struct FlowProducer {
     /// Worker polling interval (default: 5s)
     /// Pollers check for record intervals and timeouts at this frequency.
     /// Lower values = more responsive but higher CPU. Higher values = less overhead.
-    /// At default scale (~16K active flows, 4 workers): ~800 checks/sec per worker.
+    /// At default scale (~16K active flows), each poller checks only its assigned DashMap shard.
     #[serde(with = "duration")]
     pub flow_store_poll_interval: Duration,
 

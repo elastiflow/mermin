@@ -23,7 +23,6 @@ use mermin_common::{
 };
 use num_iter::range_inclusive;
 use num_traits::PrimInt;
-use pnet::datalink::MacAddr;
 use tracing::{error, warn};
 
 use crate::{
@@ -274,10 +273,15 @@ impl<T: std::hash::Hash + Eq> RuleCollection<T> for HashSet<T> {
 }
 
 impl RuleCollection<str> for GlobSet {
-    /// Lowercases `value` before matching; patterns are pre-normalized to lowercase
-    /// in [`build_glob_set`] so matching is effectively case-insensitive.
+    /// Matches `value` case-insensitively; patterns are pre-normalized to lowercase
+    /// in [`build_glob_set`]. Avoids allocating when `value` is already lowercase
+    /// (the common case for static protocol/flag strings from `as_str()` methods).
     fn matches(&self, value: &str) -> bool {
-        self.is_match(value.to_lowercase())
+        if value.bytes().any(|b| b.is_ascii_uppercase()) {
+            self.is_match(value.to_lowercase())
+        } else {
+            self.is_match(value)
+        }
     }
 
     fn is_empty(&self) -> bool {
@@ -353,7 +357,7 @@ impl PacketFilter {
         flow_key: &mermin_common::FlowKey,
         stats: &mermin_common::FlowStats,
     ) -> Result<bool, IpError> {
-        check_filter!(&self.network.transport, &flow_key.protocol.to_string());
+        check_filter!(&self.network.transport, flow_key.protocol.as_str());
 
         let ip_version_str = match flow_key.ip_version {
             mermin_common::IpVersion::V4 => "ipv4",
@@ -375,9 +379,13 @@ impl PacketFilter {
         }
 
         if let Some(rules) = &self.network.interface_mac {
-            // Matches against the source MAC, which corresponds to the sending interface
-            // in the forward direction of the flow.
-            let mac = MacAddr::new(
+            // Format the MAC directly as lowercase hex (e.g. "aa:bb:cc:dd:ee:ff").
+            // This avoids the pnet MacAddr::to_string() heap allocation AND the
+            // subsequent to_lowercase() allocation inside GlobSet::matches(), since
+            // the output is already lowercase and GlobSet::matches skips lowercasing
+            // when no uppercase bytes are present.
+            let mac_str = format!(
+                "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
                 stats.src_mac[0],
                 stats.src_mac[1],
                 stats.src_mac[2],
@@ -385,7 +393,7 @@ impl PacketFilter {
                 stats.src_mac[4],
                 stats.src_mac[5],
             );
-            if !rules.is_allowed(&mac.to_string()) {
+            if !rules.is_allowed(mac_str.as_str()) {
                 return Ok(false);
             }
         }
@@ -393,14 +401,24 @@ impl PacketFilter {
         // Flow-level filters — resolve numeric DSCP/ECN values to their standard names
         // (e.g. 46 → "ef", 0 → "df") so filter patterns match what operators expect.
         // Falls back to the raw decimal string for values not in the standard registry.
-        let dscp_str: Cow<'static, str> = IpDscp::try_from_u8(stats.ip_dscp)
-            .map(|d| Cow::Borrowed(d.as_str()))
-            .unwrap_or_else(|| Cow::Owned(stats.ip_dscp.to_string()));
-        let ecn_str: Cow<'static, str> = IpEcn::try_from_u8(stats.ip_ecn)
-            .map(|e| Cow::Borrowed(e.as_str()))
-            .unwrap_or_else(|| Cow::Owned(stats.ip_ecn.to_string()));
-        check_filter!(&self.flow.ip_dscp_name, dscp_str.as_ref());
-        check_filter!(&self.flow.ip_ecn_name, ecn_str.as_ref());
+        // String conversion is deferred until the filter is actually configured to avoid
+        // heap allocations on every flow when these filters are absent.
+        if let Some(rules) = &self.flow.ip_dscp_name {
+            let dscp_str: Cow<'static, str> = IpDscp::try_from_u8(stats.ip_dscp)
+                .map(|d| Cow::Borrowed(d.as_str()))
+                .unwrap_or_else(|| Cow::Owned(stats.ip_dscp.to_string()));
+            if !rules.is_allowed(dscp_str.as_ref()) {
+                return Ok(false);
+            }
+        }
+        if let Some(rules) = &self.flow.ip_ecn_name {
+            let ecn_str: Cow<'static, str> = IpEcn::try_from_u8(stats.ip_ecn)
+                .map(|e| Cow::Borrowed(e.as_str()))
+                .unwrap_or_else(|| Cow::Owned(stats.ip_ecn.to_string()));
+            if !rules.is_allowed(ecn_str.as_ref()) {
+                return Ok(false);
+            }
+        }
         check_filter!(&self.flow.ip_ttl, &stats.ip_ttl);
 
         if flow_key.ip_version == mermin_common::IpVersion::V6 {
@@ -408,39 +426,53 @@ impl PacketFilter {
         }
 
         if matches!(flow_key.protocol, IpProto::Icmp | IpProto::Ipv6Icmp) {
-            type GetTypeName = fn(u8) -> Option<&'static str>;
-            type GetCodeName = fn(u8, u8) -> Option<&'static str>;
-            let (get_type, get_code): (GetTypeName, GetCodeName) =
-                if flow_key.protocol == IpProto::Icmp {
-                    (get_icmpv4_type_name, get_icmpv4_code_name)
-                } else {
-                    (get_icmpv6_type_name, get_icmpv6_code_name)
-                };
-            let icmp_type_str: Cow<'static, str> = get_type(stats.icmp_type)
-                .map(Cow::Borrowed)
-                .unwrap_or_else(|| Cow::Owned(stats.icmp_type.to_string()));
-            let icmp_code_str: Cow<'static, str> = get_code(stats.icmp_type, stats.icmp_code)
-                .map(Cow::Borrowed)
-                .unwrap_or_else(|| Cow::Owned(stats.icmp_code.to_string()));
-            check_filter!(&self.flow.icmp_type_name, icmp_type_str.as_ref());
-            check_filter!(&self.flow.icmp_code_name, icmp_code_str.as_ref());
+            // Only resolve ICMP name strings if the corresponding filter is configured,
+            // deferring both the lookup and any fallback to_string() allocation.
+            if self.flow.icmp_type_name.is_some() || self.flow.icmp_code_name.is_some() {
+                type GetTypeName = fn(u8) -> Option<&'static str>;
+                type GetCodeName = fn(u8, u8) -> Option<&'static str>;
+                let (get_type, get_code): (GetTypeName, GetCodeName) =
+                    if flow_key.protocol == IpProto::Icmp {
+                        (get_icmpv4_type_name, get_icmpv4_code_name)
+                    } else {
+                        (get_icmpv6_type_name, get_icmpv6_code_name)
+                    };
+                if let Some(rules) = &self.flow.icmp_type_name {
+                    let icmp_type_str: Cow<'static, str> = get_type(stats.icmp_type)
+                        .map(Cow::Borrowed)
+                        .unwrap_or_else(|| Cow::Owned(stats.icmp_type.to_string()));
+                    if !rules.is_allowed(icmp_type_str.as_ref()) {
+                        return Ok(false);
+                    }
+                }
+                if let Some(rules) = &self.flow.icmp_code_name {
+                    let icmp_code_str: Cow<'static, str> =
+                        get_code(stats.icmp_type, stats.icmp_code)
+                            .map(Cow::Borrowed)
+                            .unwrap_or_else(|| Cow::Owned(stats.icmp_code.to_string()));
+                    if !rules.is_allowed(icmp_code_str.as_ref()) {
+                        return Ok(false);
+                    }
+                }
+            }
         }
 
         if flow_key.protocol == IpProto::Tcp {
             if let Some(rules) = &self.flow.tcp_flags_tags {
-                let flags_vec = TcpFlags::flags_from_bits(stats.tcp_flags);
-                for flag in &flags_vec {
-                    if RuleCollection::<str>::matches(&rules.not_match_rules, flag.as_str()) {
+                // Single-pass: check not-match and match rules together, avoiding the
+                // original two-pass iteration and the heap Vec allocation from flags_from_bits.
+                let mut has_match = RuleCollection::<str>::is_empty(&rules.match_rules);
+                for flag in TcpFlags::flags_from_bits(stats.tcp_flags) {
+                    let s = flag.as_str();
+                    if RuleCollection::<str>::matches(&rules.not_match_rules, s) {
                         return Ok(false);
+                    }
+                    if !has_match && RuleCollection::<str>::matches(&rules.match_rules, s) {
+                        has_match = true;
                     }
                 }
-                if !RuleCollection::<str>::is_empty(&rules.match_rules) {
-                    let has_match = flags_vec
-                        .iter()
-                        .any(|f| RuleCollection::<str>::matches(&rules.match_rules, f.as_str()));
-                    if !has_match {
-                        return Ok(false);
-                    }
+                if !has_match {
+                    return Ok(false);
                 }
             }
 
