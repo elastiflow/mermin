@@ -6,7 +6,7 @@
 //! - Support for Pods, Nodes, key workload types (Deployments, StatefulSets, etc.).
 //! - Network-related resources like Services, Ingresses and NetworkPolicies.
 
-use std::{collections::HashMap, net::IpAddr};
+use std::{collections::HashMap, net::IpAddr, sync::Arc};
 
 use k8s_openapi::api::core::v1::Pod;
 use tracing::debug;
@@ -179,12 +179,17 @@ impl<'a> Decorator<'a> {
         }
 
         if extract_namespace && self.should_extract(kind, "namespace", is_source) {
-            self.set_k8s_attr_opt(flow_span, "namespace.name", &meta.namespace, is_source);
+            self.set_k8s_attr_opt(
+                flow_span,
+                "namespace.name",
+                meta.namespace.as_deref(),
+                is_source,
+            );
         }
 
         if self.should_extract(kind, "uid", is_source) {
             let attr_key = format!("{kind}.uid");
-            self.set_k8s_attr_opt(flow_span, &attr_key, &meta.uid, is_source);
+            self.set_k8s_attr_opt(flow_span, &attr_key, meta.uid.as_deref(), is_source);
         }
 
         if self.should_extract(kind, "annotations", is_source) {
@@ -213,7 +218,7 @@ impl<'a> Decorator<'a> {
                 self.populate_common_meta(flow_span, "pod", pod_meta, is_source, true);
 
                 if self.should_extract("pod", "node_name", is_source) {
-                    self.set_k8s_attr_opt(flow_span, "node.name", node_name, is_source);
+                    self.set_k8s_attr_opt(flow_span, "node.name", node_name.as_deref(), is_source);
                 }
 
                 if let Some((container_name, container_image)) =
@@ -249,7 +254,12 @@ impl<'a> Decorator<'a> {
             }
             DecorationInfo::EndpointSlice { slice } => {
                 if self.should_extract("endpointslice", "namespace", is_source) {
-                    self.set_k8s_attr_opt(flow_span, "namespace.name", &slice.namespace, is_source);
+                    self.set_k8s_attr_opt(
+                        flow_span,
+                        "namespace.name",
+                        slice.namespace.as_deref(),
+                        is_source,
+                    );
                 }
 
                 if self.should_extract("endpointslice", "annotations", is_source) {
@@ -334,14 +344,14 @@ impl<'a> Decorator<'a> {
         value: &str,
         is_source: bool,
     ) {
-        self.set_k8s_attr_opt(flow_span, attr_name, &Some(value.to_string()), is_source);
+        self.set_k8s_attr_opt(flow_span, attr_name, Some(value), is_source);
     }
 
     fn set_k8s_attr_opt(
         &self,
         flow_span: &mut FlowSpan,
         attr_name: &str,
-        value: &Option<String>,
+        value: Option<&str>,
         is_source: bool,
     ) {
         let attrs = flow_span.attrs_mut();
@@ -374,7 +384,7 @@ impl<'a> Decorator<'a> {
             ("service.name", source_k8s_service_name, destination_k8s_service_name),
         };
 
-        *field = value.clone();
+        *field = value.map(Arc::from);
     }
 
     fn set_k8s_map_attr(
@@ -384,54 +394,49 @@ impl<'a> Decorator<'a> {
         value: &Option<HashMap<String, String>>,
         is_source: bool,
     ) {
+        let converted = value.as_ref().map(|m| {
+            m.iter()
+                .map(|(k, v)| (k.clone(), Arc::from(v.as_str())))
+                .collect::<HashMap<String, Arc<str>>>()
+        });
         let attrs = flow_span.attrs_mut();
         match (is_source, attr_name) {
-            (true, "pod.annotations") => attrs.source_k8s_pod_annotations = value.clone(),
-            (false, "pod.annotations") => attrs.destination_k8s_pod_annotations = value.clone(),
+            (true, "pod.annotations") => attrs.source_k8s_pod_annotations = converted,
+            (false, "pod.annotations") => attrs.destination_k8s_pod_annotations = converted,
 
-            (true, "node.annotations") => attrs.source_k8s_node_annotations = value.clone(),
-            (false, "node.annotations") => attrs.destination_k8s_node_annotations = value.clone(),
+            (true, "node.annotations") => attrs.source_k8s_node_annotations = converted,
+            (false, "node.annotations") => attrs.destination_k8s_node_annotations = converted,
 
-            (true, "service.annotations") => attrs.source_k8s_service_annotations = value.clone(),
-            (false, "service.annotations") => {
-                attrs.destination_k8s_service_annotations = value.clone()
-            }
+            (true, "service.annotations") => attrs.source_k8s_service_annotations = converted,
+            (false, "service.annotations") => attrs.destination_k8s_service_annotations = converted,
 
-            (true, "deployment.annotations") => {
-                attrs.source_k8s_deployment_annotations = value.clone()
-            }
+            (true, "deployment.annotations") => attrs.source_k8s_deployment_annotations = converted,
             (false, "deployment.annotations") => {
-                attrs.destination_k8s_deployment_annotations = value.clone()
+                attrs.destination_k8s_deployment_annotations = converted
             }
 
-            (true, "daemonset.annotations") => {
-                attrs.source_k8s_daemonset_annotations = value.clone()
-            }
+            (true, "daemonset.annotations") => attrs.source_k8s_daemonset_annotations = converted,
             (false, "daemonset.annotations") => {
-                attrs.destination_k8s_daemonset_annotations = value.clone()
+                attrs.destination_k8s_daemonset_annotations = converted
             }
 
-            (true, "replicaset.annotations") => {
-                attrs.source_k8s_replicaset_annotations = value.clone()
-            }
+            (true, "replicaset.annotations") => attrs.source_k8s_replicaset_annotations = converted,
             (false, "replicaset.annotations") => {
-                attrs.destination_k8s_replicaset_annotations = value.clone()
+                attrs.destination_k8s_replicaset_annotations = converted
             }
 
             (true, "statefulset.annotations") => {
-                attrs.source_k8s_statefulset_annotations = value.clone()
+                attrs.source_k8s_statefulset_annotations = converted
             }
             (false, "statefulset.annotations") => {
-                attrs.destination_k8s_statefulset_annotations = value.clone()
+                attrs.destination_k8s_statefulset_annotations = converted
             }
 
-            (true, "job.annotations") => attrs.source_k8s_job_annotations = value.clone(),
-            (false, "job.annotations") => attrs.destination_k8s_job_annotations = value.clone(),
+            (true, "job.annotations") => attrs.source_k8s_job_annotations = converted,
+            (false, "job.annotations") => attrs.destination_k8s_job_annotations = converted,
 
-            (true, "cronjob.annotations") => attrs.source_k8s_cronjob_annotations = value.clone(),
-            (false, "cronjob.annotations") => {
-                attrs.destination_k8s_cronjob_annotations = value.clone()
-            }
+            (true, "cronjob.annotations") => attrs.source_k8s_cronjob_annotations = converted,
+            (false, "cronjob.annotations") => attrs.destination_k8s_cronjob_annotations = converted,
             _ => {}
         }
     }

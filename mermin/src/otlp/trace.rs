@@ -1,4 +1,4 @@
-use std::{any::Any, sync::Arc, time::SystemTime};
+use std::{any::Any, borrow::Cow, sync::Arc, time::SystemTime};
 
 use async_trait::async_trait;
 use opentelemetry::{
@@ -36,47 +36,22 @@ pub type TraceableRecord = Arc<dyn Traceable + Send + Sync + 'static>;
 /// Defines a common interface for data structures that can be represented as an
 /// OpenTelemetry trace span.
 pub trait Traceable {
-    /// Returns the logical start time of the event represented by this record.
-    ///
-    /// This timestamp will be used as the `start_time_unix_nano` for the
-    /// resulting OpenTelemetry `Span`.
+    /// The logical start time of the event represented by this record.
     fn start_time(&self) -> SystemTime;
 
-    /// Returns the logical end time of the event represented by this record.
-    ///
-    /// This timestamp will be used as the `end_time_unix_nano` for the
-    /// resulting OpenTelemetry `Span`.
+    /// The logical end time of the event represented by this record.
     fn end_time(&self) -> SystemTime;
 
-    /// Returns a specific name for the span, if applicable.
-    ///
-    /// If `Some(String)` is returned, it will be used as the `Span` name. If `None` is
-    /// returned, the exporter is expected to use a default or generic name.
-    fn name(&self) -> Option<String>;
+    /// A specific name for the span, if applicable.
+    fn name(&self) -> Option<Cow<'static, str>>;
 
-    /// Returns a custom trace ID for this span, if available.
-    ///
-    /// If `Some(TraceId)` is returned, it will be used as the trace ID for this span,
-    /// enabling correlation of multiple spans under the same trace. If `None` is returned,
-    /// OpenTelemetry will generate a new random trace ID.
+    /// A custom trace ID for this span, if available.
     fn trace_id(&self) -> Option<TraceId>;
 
-    /// Returns the OpenTelemetry span kind for this record.
-    ///
-    /// The span kind indicates the role of the span in the trace (e.g., Client, Server, Internal).
-    /// For network flows, this is determined by direction inference based on listening ports,
-    /// TCP handshake patterns, and port number heuristics.
+    /// The OpenTelemetry span kind for this record.
     fn span_kind(&self) -> SpanKind;
 
     /// Populates a pre-configured `Span` with the record's specific attributes.
-    ///
-    /// This is the core method where the implementing type is responsible for mapping
-    /// its internal fields to the key-value attributes of an OpenTelemetry `Span`.
-    ///
-    /// ### Important
-    /// For performance reasons within the export pipeline, this method is designed to
-    /// be called **only once** per record. The implementation should be efficient and
-    /// perform all necessary attribute-setting within this single call.
     fn record(&self, span: opentelemetry_sdk::trace::Span) -> opentelemetry_sdk::trace::Span;
 }
 
@@ -91,7 +66,7 @@ pub trait TraceableExporter: Send + Sync {
 impl TraceableExporter for TraceExporterAdapter {
     async fn export(&self, traceable: TraceableRecord) {
         let tracer = &self.tracer;
-        let name = traceable.name().unwrap_or_else(|| "flow".to_string());
+        let name = traceable.name().unwrap_or(Cow::Borrowed("flow"));
 
         let mut builder = tracer
             .span_builder(name)

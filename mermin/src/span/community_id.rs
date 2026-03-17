@@ -4,6 +4,23 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use mermin_common::ip::IpProto;
 use sha1::{Digest, Sha1};
 
+/// Stack-allocated byte representation of an IP address, preserving the
+/// original byte count (4 for IPv4, 16 for IPv6) to maintain Community ID
+/// hash compatibility with the community-id spec.
+enum IpBytes {
+    V4([u8; 4]),
+    V6([u8; 16]),
+}
+
+impl IpBytes {
+    fn as_slice(&self) -> &[u8] {
+        match self {
+            IpBytes::V4(b) => b,
+            IpBytes::V6(b) => b,
+        }
+    }
+}
+
 /// Community ID generator with configurable seed
 #[derive(Debug, Default, Clone)]
 pub struct CommunityIdGenerator {
@@ -58,8 +75,8 @@ impl CommunityIdGenerator {
         );
         let mut hasher = Sha1::new();
         hasher.update(seed_bytes);
-        hasher.update(&first_addr);
-        hasher.update(&second_addr);
+        hasher.update(first_addr.as_slice());
+        hasher.update(second_addr.as_slice());
         hasher.update([proto, 0]);
         hasher.update(first_port);
         hasher.update(second_port);
@@ -67,21 +84,21 @@ impl CommunityIdGenerator {
         format!("1:{}", BASE64.encode(hasher.finalize()))
     }
 
-    fn ip_addr_to_bytes(&self, addr: IpAddr) -> Vec<u8> {
+    fn ip_addr_to_bytes(&self, addr: IpAddr) -> IpBytes {
         match addr {
-            IpAddr::V4(ipv4) => ipv4.octets().to_vec(),
-            IpAddr::V6(ipv6) => ipv6.octets().to_vec(),
+            IpAddr::V4(ipv4) => IpBytes::V4(ipv4.octets()),
+            IpAddr::V6(ipv6) => IpBytes::V6(ipv6.octets()),
         }
     }
 
     fn order_endpoints(
         &self,
-        src_addr: Vec<u8>,
-        dst_addr: Vec<u8>,
+        src_addr: IpBytes,
+        dst_addr: IpBytes,
         src_port: [u8; 2],
         dst_port: [u8; 2],
-    ) -> (Vec<u8>, Vec<u8>, [u8; 2], [u8; 2]) {
-        match src_addr.cmp(&dst_addr) {
+    ) -> (IpBytes, IpBytes, [u8; 2], [u8; 2]) {
+        match src_addr.as_slice().cmp(dst_addr.as_slice()) {
             std::cmp::Ordering::Less => (src_addr, dst_addr, src_port, dst_port),
             std::cmp::Ordering::Greater => (dst_addr, src_addr, dst_port, src_port),
             std::cmp::Ordering::Equal => match src_port.cmp(&dst_port) {
