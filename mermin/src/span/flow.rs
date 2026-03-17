@@ -123,7 +123,7 @@ impl FlowSpan {
 #[derive(Debug, Clone, Serialize)]
 pub struct SpanAttributes {
     // General Flow Attribute
-    pub flow_community_id: String,
+    pub flow_community_id: Arc<str>,
     #[serde(serialize_with = "serialize_flow_direction")]
     pub flow_direction: FlowDirection,
     #[serde(serialize_with = "serialize_connection_state")]
@@ -145,25 +145,25 @@ pub struct SpanAttributes {
     #[serde(serialize_with = "serialize_option_mac_addr")]
     pub network_interface_mac: Option<pnet::datalink::MacAddr>,
     pub flow_ip_dscp_id: Option<u8>,
-    pub flow_ip_dscp_name: Option<String>,
+    pub flow_ip_dscp_name: Option<&'static str>,
     pub flow_ip_ecn_id: Option<u8>,
-    pub flow_ip_ecn_name: Option<String>,
+    pub flow_ip_ecn_name: Option<&'static str>,
     pub flow_ip_ttl: Option<u8>,
     pub flow_ip_flow_label: Option<u32>,
     pub flow_reverse_ip_dscp_id: Option<u8>,
-    pub flow_reverse_ip_dscp_name: Option<String>,
+    pub flow_reverse_ip_dscp_name: Option<&'static str>,
     pub flow_reverse_ip_ecn_id: Option<u8>,
-    pub flow_reverse_ip_ecn_name: Option<String>,
+    pub flow_reverse_ip_ecn_name: Option<&'static str>,
     pub flow_reverse_ip_ttl: Option<u8>,
     pub flow_reverse_ip_flow_label: Option<u32>,
     pub flow_icmp_type_id: Option<u8>,
-    pub flow_icmp_type_name: Option<String>,
+    pub flow_icmp_type_name: Option<&'static str>,
     pub flow_icmp_code_id: Option<u8>,
-    pub flow_icmp_code_name: Option<String>,
+    pub flow_icmp_code_name: Option<&'static str>,
     pub flow_reverse_icmp_type_id: Option<u8>,
-    pub flow_reverse_icmp_type_name: Option<String>,
+    pub flow_reverse_icmp_type_name: Option<&'static str>,
     pub flow_reverse_icmp_code_id: Option<u8>,
-    pub flow_reverse_icmp_code_name: Option<String>,
+    pub flow_reverse_icmp_code_name: Option<&'static str>,
     pub flow_tcp_flags_bits: Option<u8>,
     #[serde(serialize_with = "serialize_option_tcp_flags")]
     pub flow_tcp_flags_tags: Option<Vec<TcpFlag>>,
@@ -300,7 +300,7 @@ pub struct SpanAttributes {
 impl Default for SpanAttributes {
     fn default() -> Self {
         Self {
-            flow_community_id: String::new(),
+            flow_community_id: Arc::from(""),
             flow_direction: FlowDirection::Unknown,
             flow_connection_state: None,
             flow_end_reason: None,
@@ -459,7 +459,7 @@ impl Traceable for FlowSpan {
         Some(format!(
             "flow_{}_{}",
             self.attributes.network_type.as_str(),
-            self.attributes.network_transport.to_string().as_str()
+            self.attributes.network_transport.as_str()
         ))
     }
 
@@ -483,7 +483,7 @@ impl Traceable for FlowSpan {
 
         kvs.push(KeyValue::new(
             "flow.community_id",
-            self.attributes.flow_community_id.to_string(),
+            self.attributes.flow_community_id.clone(),
         ));
         kvs.push(KeyValue::new(
             "flow.direction",
@@ -563,14 +563,14 @@ impl Traceable for FlowSpan {
         if let Some(value) = self.attributes.flow_ip_dscp_id {
             kvs.push(KeyValue::new("flow.ip.dscp.id", value as i64));
         }
-        if let Some(ref value) = self.attributes.flow_ip_dscp_name {
-            kvs.push(KeyValue::new("flow.ip.dscp.name", value.to_owned()));
+        if let Some(value) = self.attributes.flow_ip_dscp_name {
+            kvs.push(KeyValue::new("flow.ip.dscp.name", value));
         }
         if let Some(value) = self.attributes.flow_ip_ecn_id {
             kvs.push(KeyValue::new("flow.ip.ecn.id", value as i64));
         }
-        if let Some(ref value) = self.attributes.flow_ip_ecn_name {
-            kvs.push(KeyValue::new("flow.ip.ecn.name", value.to_owned()));
+        if let Some(value) = self.attributes.flow_ip_ecn_name {
+            kvs.push(KeyValue::new("flow.ip.ecn.name", value));
         }
         if let Some(value) = self.attributes.flow_ip_ttl {
             kvs.push(KeyValue::new("flow.ip.ttl", value as i64));
@@ -593,32 +593,26 @@ impl Traceable for FlowSpan {
         if let Some(value) = self.attributes.flow_icmp_type_id {
             kvs.push(KeyValue::new("flow.icmp.type.id", value as i64));
         }
-        if let Some(ref value) = self.attributes.flow_icmp_type_name {
-            kvs.push(KeyValue::new("flow.icmp.type.name", value.to_owned()));
+        if let Some(value) = self.attributes.flow_icmp_type_name {
+            kvs.push(KeyValue::new("flow.icmp.type.name", value));
         }
         if let Some(value) = self.attributes.flow_icmp_code_id {
             kvs.push(KeyValue::new("flow.icmp.code.id", value as i64));
         }
-        if let Some(ref value) = self.attributes.flow_icmp_code_name {
-            kvs.push(KeyValue::new("flow.icmp.code.name", value.to_owned()));
+        if let Some(value) = self.attributes.flow_icmp_code_name {
+            kvs.push(KeyValue::new("flow.icmp.code.name", value));
         }
         if let Some(value) = self.attributes.flow_reverse_icmp_type_id {
             kvs.push(KeyValue::new("flow.reverse.icmp.type.id", value as i64));
         }
-        if let Some(ref value) = self.attributes.flow_reverse_icmp_type_name {
-            kvs.push(KeyValue::new(
-                "flow.reverse.icmp.type.name",
-                value.to_owned(),
-            ));
+        if let Some(value) = self.attributes.flow_reverse_icmp_type_name {
+            kvs.push(KeyValue::new("flow.reverse.icmp.type.name", value));
         }
         if let Some(value) = self.attributes.flow_reverse_icmp_code_id {
             kvs.push(KeyValue::new("flow.reverse.icmp.code.id", value as i64));
         }
-        if let Some(ref value) = self.attributes.flow_reverse_icmp_code_name {
-            kvs.push(KeyValue::new(
-                "flow.reverse.icmp.code.name",
-                value.to_owned(),
-            ));
+        if let Some(value) = self.attributes.flow_reverse_icmp_code_name {
+            kvs.push(KeyValue::new("flow.reverse.icmp.code.name", value));
         }
         if let Some(value) = self.attributes.flow_tcp_flags_bits {
             kvs.push(KeyValue::new("flow.tcp.flags.bits", value as i64));
@@ -1340,7 +1334,7 @@ mod tests {
     fn test_span_attributes_default() {
         let attrs = SpanAttributes::default();
 
-        assert_eq!(attrs.flow_community_id, String::new());
+        assert_eq!(&*attrs.flow_community_id, "");
         assert_eq!(attrs.flow_connection_state, None);
         assert_eq!(attrs.flow_end_reason, None);
         assert_eq!(attrs.source_port, 0);

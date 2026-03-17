@@ -766,7 +766,7 @@ impl FlowWorker {
             )
             .into();
 
-        self.create_flow_span(&community_id, &event.flow_key, &stats)
+        self.create_flow_span(community_id, &event.flow_key, &stats)
             .await?;
 
         guard.keep();
@@ -861,7 +861,7 @@ impl FlowWorker {
     /// Create a FlowSpan from eBPF FlowStats
     async fn create_flow_span(
         &self,
-        community_id: &str,
+        community_id: Arc<str>,
         flow_key: &FlowKey,
         stats: &FlowStats,
     ) -> Result<(), Error> {
@@ -890,7 +890,7 @@ impl FlowWorker {
             end_time: UNIX_EPOCH + Duration::from_nanos(end_time_nanos),
             span_kind,
             attributes: Arc::new(SpanAttributes {
-                flow_community_id: community_id.to_string(),
+                flow_community_id: community_id.clone(),
                 flow_direction,
                 flow_connection_state: is_tcp.then_some(stats.tcp_state),
                 flow_end_reason: None,
@@ -910,15 +910,13 @@ impl FlowWorker {
                 flow_ip_dscp_name: is_ip_flow.then_some(
                     IpDscp::try_from_u8(stats.ip_dscp)
                         .unwrap_or_default()
-                        .as_str()
-                        .to_string(),
+                        .as_str(),
                 ),
                 flow_ip_ecn_id: is_ip_flow.then_some(stats.ip_ecn),
                 flow_ip_ecn_name: is_ip_flow.then_some(
                     IpEcn::try_from_u8(stats.ip_ecn)
                         .unwrap_or_default()
-                        .as_str()
-                        .to_string(),
+                        .as_str(),
                 ),
                 flow_ip_ttl: is_ip_flow.then_some(stats.ip_ttl),
                 flow_ip_flow_label: is_ipv6.then_some(stats.ip_flow_label),
@@ -927,15 +925,13 @@ impl FlowWorker {
                 flow_reverse_ip_dscp_name: is_ip_flow.then_some(
                     IpDscp::try_from_u8(stats.reverse_ip_dscp)
                         .unwrap_or_default()
-                        .as_str()
-                        .to_string(),
+                        .as_str(),
                 ),
                 flow_reverse_ip_ecn_id: is_ip_flow.then_some(stats.reverse_ip_ecn),
                 flow_reverse_ip_ecn_name: is_ip_flow.then_some(
                     IpEcn::try_from_u8(stats.reverse_ip_ecn)
                         .unwrap_or_default()
-                        .as_str()
-                        .to_string(),
+                        .as_str(),
                 ),
                 flow_reverse_ip_ttl: is_ip_flow.then_some(stats.reverse_ip_ttl),
                 flow_reverse_ip_flow_label: is_ipv6.then_some(stats.reverse_ip_flow_label),
@@ -1027,7 +1023,7 @@ impl FlowWorker {
             timeout_duration: Duration::from_secs(0),
         };
 
-        self.insert_flow(Arc::from(community_id), span, timeout);
+        self.insert_flow(community_id, span, timeout);
 
         let interface_name = iface_name.as_deref().unwrap_or("unknown");
         metrics::registry::PROCESSING_TOTAL
@@ -1453,11 +1449,11 @@ impl std::error::Error for BootTimeError {
 /// Resolve an ICMP type value to its human-readable name for the given IP version.
 ///
 /// Returns `None` for non-ICMP protocols or unknown type values.
-fn icmp_type_name(is_icmp: bool, is_icmpv6: bool, icmp_type: u8) -> Option<String> {
+fn icmp_type_name(is_icmp: bool, is_icmpv6: bool, icmp_type: u8) -> Option<&'static str> {
     if is_icmp {
-        mermin_common::icmp::get_icmpv4_type_name(icmp_type).map(String::from)
+        mermin_common::icmp::get_icmpv4_type_name(icmp_type)
     } else if is_icmpv6 {
-        mermin_common::icmp::get_icmpv6_type_name(icmp_type).map(String::from)
+        mermin_common::icmp::get_icmpv6_type_name(icmp_type)
     } else {
         None
     }
@@ -1466,11 +1462,16 @@ fn icmp_type_name(is_icmp: bool, is_icmpv6: bool, icmp_type: u8) -> Option<Strin
 /// Resolve an ICMP type+code pair to the human-readable code name for the given IP version.
 ///
 /// Returns `None` for non-ICMP protocols or unknown type/code combinations.
-fn icmp_code_name(is_icmp: bool, is_icmpv6: bool, icmp_type: u8, icmp_code: u8) -> Option<String> {
+fn icmp_code_name(
+    is_icmp: bool,
+    is_icmpv6: bool,
+    icmp_type: u8,
+    icmp_code: u8,
+) -> Option<&'static str> {
     if is_icmp {
-        mermin_common::icmp::get_icmpv4_code_name(icmp_type, icmp_code).map(String::from)
+        mermin_common::icmp::get_icmpv4_code_name(icmp_type, icmp_code)
     } else if is_icmpv6 {
-        mermin_common::icmp::get_icmpv6_code_name(icmp_type, icmp_code).map(String::from)
+        mermin_common::icmp::get_icmpv6_code_name(icmp_type, icmp_code)
     } else {
         None
     }
@@ -1757,15 +1758,13 @@ async fn record_flow(
         attrs.flow_ip_dscp_name = Some(
             IpDscp::try_from_u8(stats.ip_dscp)
                 .unwrap_or_default()
-                .as_str()
-                .to_string(),
+                .as_str(),
         );
         attrs.flow_ip_ecn_id = Some(stats.ip_ecn);
         attrs.flow_ip_ecn_name = Some(
             IpEcn::try_from_u8(stats.ip_ecn)
                 .unwrap_or_default()
-                .as_str()
-                .to_string(),
+                .as_str(),
         );
         attrs.flow_ip_ttl = Some(stats.ip_ttl);
 
@@ -1773,15 +1772,13 @@ async fn record_flow(
         attrs.flow_reverse_ip_dscp_name = Some(
             IpDscp::try_from_u8(stats.reverse_ip_dscp)
                 .unwrap_or_default()
-                .as_str()
-                .to_string(),
+                .as_str(),
         );
         attrs.flow_reverse_ip_ecn_id = Some(stats.reverse_ip_ecn);
         attrs.flow_reverse_ip_ecn_name = Some(
             IpEcn::try_from_u8(stats.reverse_ip_ecn)
                 .unwrap_or_default()
-                .as_str()
-                .to_string(),
+                .as_str(),
         );
         attrs.flow_reverse_ip_ttl = Some(stats.reverse_ip_ttl);
     }
