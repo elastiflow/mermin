@@ -216,6 +216,7 @@ fn create_k8s_attributes_mapping(direction: &str) -> AttributesOptions {
 #[derive(Debug, Clone)]
 pub struct K8sObjectMeta {
     pub kind: String,
+    pub kind_lower: String,
     pub name: String,
     pub uid: Option<String>,
     pub namespace: Option<String>,
@@ -230,8 +231,11 @@ where
     T: Resource<DynamicType = ()>,
 {
     fn from(resource: &T) -> Self {
+        let kind = T::kind(&()).to_string();
+        let kind_lower = kind.to_lowercase();
         Self {
-            kind: T::kind(&()).to_string(),
+            kind,
+            kind_lower,
             name: resource.name_any(),
             uid: resource.uid(),
             namespace: resource.namespace(),
@@ -334,7 +338,7 @@ impl ResourceStore {
         client: Client,
         health_state: HealthState,
         required_kinds: &HashSet<String>,
-        ip_index: Arc<ArcSwap<HashMap<String, Vec<K8sObjectMeta>>>>,
+        ip_index: Arc<ArcSwap<HashMap<IpAddr, Vec<K8sObjectMeta>>>>,
         conf: &Conf,
         cleanup_tracker: Option<MetricsEvictor>,
     ) -> Result<Self, K8sError> {
@@ -618,9 +622,9 @@ where
 /// Represents the context of a network flow for policy evaluation
 #[derive(Debug, Clone)]
 pub struct FlowContext {
-    pub src_pod: Option<Pod>,
+    pub src_pod: Option<Arc<Pod>>,
     pub src_ip: IpAddr,
-    pub dst_pod: Option<Pod>,
+    pub dst_pod: Option<Arc<Pod>>,
     pub dst_ip: IpAddr,
     pub port: u16,
     pub protocol: IpProto,
@@ -639,9 +643,9 @@ impl FlowContext {
         let dst_pod = attributor.get_pod_by_ip(dst_ip).await;
 
         Self {
-            src_pod: src_pod.as_deref().cloned(),
+            src_pod,
             src_ip,
-            dst_pod: dst_pod.as_deref().cloned(),
+            dst_pod,
             dst_ip,
             port,
             protocol,
@@ -655,7 +659,7 @@ pub struct Attributor {
     pub owner_relations_manager: OwnerRelationsManager,
     pub selector_relations_manager: Option<SelectorRelationsManager>,
     pub filter: ResourceFilter,
-    ip_index: Arc<ArcSwap<HashMap<String, Vec<K8sObjectMeta>>>>,
+    ip_index: Arc<ArcSwap<HashMap<IpAddr, Vec<K8sObjectMeta>>>>,
 }
 
 impl Attributor {
@@ -770,9 +774,8 @@ impl Attributor {
         K: Resource<DynamicType = ()> + Clone + Send + Sync + 'static,
         ResourceStore: HasStore<K>,
     {
-        let ip_str = ip.to_string();
         let guard = self.ip_index.load();
-        let Some(candidates) = guard.get(&ip_str) else {
+        let Some(candidates) = guard.get(&ip) else {
             return Vec::new();
         };
 
@@ -947,16 +950,14 @@ impl Attributor {
     /// Determines if an IP address is likely a node IP by checking against known node IPs.
     /// This provides more accurate conflict resolution than generic heuristics.
     fn is_likely_node_ip(&self, ip: IpAddr) -> bool {
-        let ip_str = ip.to_string();
-
         self.resource_store.nodes.state().iter().any(|node| {
             node.status
                 .as_ref()
                 .and_then(|status| status.addresses.as_ref())
                 .map(|addresses| {
                     addresses.iter().any(|addr| {
-                        addr.address == ip_str
-                            && matches!(addr.type_.as_str(), "InternalIP" | "ExternalIP")
+                        matches!(addr.type_.as_str(), "InternalIP" | "ExternalIP")
+                            && addr.address.parse::<IpAddr>().ok().as_ref() == Some(&ip)
                     })
                 })
                 .unwrap_or(false)
@@ -1286,22 +1287,19 @@ fn extract_values_from_resource<K: serde::Serialize>(
 }
 
 async fn index_hostname(
-    new_index: &mut HashMap<String, Vec<K8sObjectMeta>>,
+    new_index: &mut HashMap<IpAddr, Vec<K8sObjectMeta>>,
     hostname: &str,
     meta: &K8sObjectMeta,
 ) {
     if let Ok(resolved_addrs) = lookup_host(format!("{hostname}:0")).await {
         for resolved in resolved_addrs {
-            new_index
-                .entry(resolved.ip().to_string())
-                .or_default()
-                .push(meta.clone());
+            add_to_index(new_index, resolved.ip(), meta);
         }
     }
 }
 
-fn add_to_index(index: &mut HashMap<String, Vec<K8sObjectMeta>>, ip: &str, meta: &K8sObjectMeta) {
-    let entries = index.entry(ip.to_string()).or_default();
+fn add_to_index(index: &mut HashMap<IpAddr, Vec<K8sObjectMeta>>, ip: IpAddr, meta: &K8sObjectMeta) {
+    let entries = index.entry(ip).or_default();
     if !entries.iter().any(|existing| existing.uid == meta.uid) {
         entries.push(meta.clone());
     }
@@ -1322,7 +1320,7 @@ where
 
 async fn index_resource_by_ip<K>(
     store: &ResourceStore,
-    new_index: &mut HashMap<String, Vec<K8sObjectMeta>>,
+    new_index: &mut HashMap<IpAddr, Vec<K8sObjectMeta>>,
     association_rule: &ObjectAssociationRule,
 ) where
     K: Resource<DynamicType = ()> + Clone + serde::Serialize + 'static,
@@ -1361,8 +1359,8 @@ async fn index_resource_by_ip<K>(
                         for value in values {
                             if path.contains("hostname") || path.contains("externalName") {
                                 index_hostname(new_index, &value, &meta).await;
-                            } else {
-                                add_to_index(new_index, &value, &meta);
+                            } else if let Ok(ip) = value.parse::<IpAddr>() {
+                                add_to_index(new_index, ip, &meta);
                             }
                         }
                     }
@@ -1681,7 +1679,7 @@ fn spawn_ip_resource_watcher<K, F>(
 /// This is triggered by resource changes for real-time accuracy.
 async fn update_ip_index(
     store: &ResourceStore,
-    index: &Arc<ArcSwap<HashMap<String, Vec<K8sObjectMeta>>>>,
+    index: &Arc<ArcSwap<HashMap<IpAddr, Vec<K8sObjectMeta>>>>,
     conf: &Conf,
 ) {
     let mut new_index = HashMap::new();
@@ -2043,7 +2041,7 @@ mod tests {
         // Verify Service match
         let has_service = selector_matches
             .iter()
-            .any(|m| m.kind.to_lowercase() == "service" && m.name == "web-service");
+            .any(|m| m.kind_lower == "service" && m.name == "web-service");
         assert!(
             has_service,
             "Selector matches should include Service 'web-service'"
@@ -2052,7 +2050,7 @@ mod tests {
         // Verify NetworkPolicy match
         let has_network_policy = selector_matches
             .iter()
-            .any(|m| m.kind.to_lowercase() == "networkpolicy" && m.name == "web-policy");
+            .any(|m| m.kind_lower == "networkpolicy" && m.name == "web-policy");
         assert!(
             has_network_policy,
             "Selector matches should include NetworkPolicy 'web-policy'"
@@ -2355,11 +2353,12 @@ mod tests {
             update_ip_index(&store, &ip_index, &conf).await;
             let guard = ip_index.load();
 
+            let pod_ip: IpAddr = "10.0.0.5".parse().unwrap();
             assert!(
-                guard.contains_key("10.0.0.5"),
+                guard.contains_key(&pod_ip),
                 "IP index should contain the pod IP"
             );
-            let meta = &guard.get("10.0.0.5").unwrap()[0];
+            let meta = &guard.get(&pod_ip).unwrap()[0];
             assert_eq!(meta.name, "test-pod");
         });
     }

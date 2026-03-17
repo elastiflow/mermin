@@ -247,6 +247,7 @@ mod tests {
     fn create_test_owner(kind: &str) -> WorkloadOwner {
         let meta = K8sObjectMeta {
             kind: kind.to_string(),
+            kind_lower: kind.to_lowercase(),
             name: format!("test-{}", kind.to_lowercase()),
             uid: Some("test-uid".to_string()),
             namespace: Some("default".to_string()),
