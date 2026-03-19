@@ -10,7 +10,7 @@ Ensure you have the following installed:
 - [**kind**](https://kind.sigs.k8s.io/docs/user/quick-start/#installation): Kubernetes in Docker
 - [**kubectl**](https://kubernetes.io/docs/tasks/tools/): Kubernetes command-line tool
 - [**Helm**](https://helm.sh/docs/intro/install/): Kubernetes package manager (version 3.x)
-- [**colima**](./development-workflow.md#using-colima-for-lsm-development)
+- [**colima**](./development-workflow.md#using-colima-for-lsm-development): Container runtime
 
 ## Overview
 
@@ -22,7 +22,7 @@ Under the hood the reproducible local environment consists of:
 - [Sample backend](https://github.com/stefanprodan/podinfo/tree/master/charts/podinfo) to accept HTTP requests
 - [traffic-gen](https://github.com/elastiflow/mermin/tree/main/charts/traffic-gen) to generate flows and simulate cluster activity
 - Mermin itself with [example config](../deployment/examples/local/config.example.hcl) and [values](../deployment/examples/local/values.yaml)
-  - Optionally deployment with the [OTel collector](../deployment/examples/local-otel/README.md) is supported using [otel config](../deployment/examples/local-otel/config.hcl)
+  - Optionally Mermin deployment with the [OTel collector](../deployment/examples/local-otel/README.md) is supported using [otel config](../deployment/examples/local-otel/config.hcl)
 
 A set of `Makefile` targets (`hack/local-perf-testing/lpt.mk`) is provided for convenient spin-up, teardown, build and rebuild.
 
