@@ -101,6 +101,7 @@ make lpt-traffic-gen
   - `lpt-build-restart`: Build the image and restart the Mermin daemonset to pick up the new image.
   - `lpt-mermin`: Install the Mermin Helm chart with a sample config.
   - `lpt-mermin-otel`: Install the Mermin Helm chart with OpenTelemetry integration and deploy a local OTel collector.
+  - `lpt-otel`: Deploy a local OTel collector.
 
 - Monitoring & Sample Apps
   - `lpt-mon`: Deploy the monitoring stack (metrics-server, Prometheus, Grafana).

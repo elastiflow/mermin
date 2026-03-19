@@ -50,14 +50,19 @@ lpt-mermin:
 	$(call log_info,Installing Mermin helm chart)
 	$(MAKE) helm-upgrade HELM_EXTRA_ARGS='--set-file config.content=docs/deployment/examples/local/config.example.hcl'
 
+
 .PHONY: lpt-mermin-otel
-lpt-mermin-otel:
+lpt-mermin-otel: lpt-otel
 	$(call log_info,Installing Mermin helm chart with OpenTelemetry)
+	$(MAKE) helm-upgrade HELM_EXTRA_ARGS='--set-file config.content=docs/deployment/examples/local-otel/config.hcl'
+
+.PHONY: lpt-otel
+lpt-otel:
+	$(call log_info,Installing OpenTelemetry Collector)
 	helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
 	helm upgrade --install --wait --timeout 120s -n default \
 		-f docs/deployment/examples/local-otel/values_otel.yaml \
 		otel-collector open-telemetry/opentelemetry-collector
-	$(MAKE) helm-upgrade HELM_EXTRA_ARGS='--set-file config.content=docs/deployment/examples/local-otel/config.hcl'
 
 #########################################
 # Monitoring and sample app deployment
