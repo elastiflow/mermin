@@ -317,7 +317,7 @@
             "uid": "${ds_prometheus}"
           },
           "editorMode": "code",
-          "expr": "sum(\n    rate(container_cpu_cfs_throttled_periods_total{namespace=\"$namespace\", pod=~'($deployment|$daemonset|$statefulset).+', image!='', container!='POD'}[1m])) by (pod)\n    / sum(rate(container_cpu_cfs_periods_total{namespace=\"$namespace\", pod=~'($deployment|$daemonset|$statefulset).+', image!='', container!='POD'}[1m])\n) by (pod)\n* on(pod) group_left(created_by_name) group(kube_pod_info{namespace=\"$namespace\", created_by_name=~'($deployment.+|$daemonset|$statefulset)', pod_ip=~\".+\"}) by (created_by_name, pod)",
+          "expr": "sum(\n    rate(container_cpu_cfs_throttled_periods_total{namespace=\"$namespace\", pod=~'($deployment|$daemonset|$statefulset).+', image!=''}[1m])) by (pod)\n    / sum(rate(container_cpu_cfs_periods_total{namespace=\"$namespace\", pod=~'($deployment|$daemonset|$statefulset).+', image!=''}[1m])\n) by (pod)\n* on(pod) group_left(created_by_name) group(kube_pod_info{namespace=\"$namespace\", created_by_name=~'($deployment.+|$daemonset|$statefulset)', pod_ip=~\".+\"}) by (created_by_name, pod)",
           "instant": false,
           "legendFormat": "{{pod}}",
           "range": true,
@@ -1112,9 +1112,9 @@
             "uid": "${ds_prometheus}"
           },
           "editorMode": "code",
-          "expr": "topk(100, sum(\n    rate(container_cpu_usage_seconds_total{namespace=\"$namespace\", pod=~\"($deployment|$daemonset|$statefulset).+\", container!=\"\"}[1m])\n) by (pod, container_name) * 1000)",
+          "expr": "topk(100, sum(\n    rate(container_cpu_usage_seconds_total{namespace=\"$namespace\", pod=~\"($deployment|$daemonset|$statefulset).+\", container!=\"\"}[1m])\n) by (pod, container) * 1000)",
           "instant": false,
-          "legendFormat": "Uses: {{pod}}/{{container_name}}",
+          "legendFormat": "Uses: {{pod}}/{{container}}",
           "range": true,
           "refId": "A"
         },
@@ -1447,7 +1447,7 @@
             "h": 7,
             "w": 8,
             "x": 0,
-            "y": 22
+            "y": 35
           },
           "id": 41,
           "interval": "5m",
@@ -1479,7 +1479,7 @@
                 "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
-              "expr": "avg_over_time(\n    max(\n        rate(container_cpu_usage_seconds_total{namespace=\"$namespace\", pod=~\"($deployment|$daemonset|$statefulset).+\"}[1m])\n        * on(pod) group_left(image) kube_pod_container_info{namespace=\"$namespace\", pod=~\"($deployment|$daemonset|$statefulset).+\", container_id=~\".+\"}\n    ) by (image)\n[5m :] )* 1000",
+              "expr": "avg_over_time(\n    max(\n        rate(container_cpu_usage_seconds_total{namespace=\"$namespace\", pod=~\"($deployment|$daemonset|$statefulset).+\", container!=\"\"}[1m])\n        * on(pod) group_left(image) kube_pod_container_info{namespace=\"$namespace\", pod=~\"($deployment|$daemonset|$statefulset).+\", container_id=~\".+\"}\n    ) by (image)\n[5m :] )* 1000",
               "instant": false,
               "legendFormat": "max: {{image}}",
               "range": true,
@@ -1586,7 +1586,7 @@
             "h": 7,
             "w": 8,
             "x": 8,
-            "y": 22
+            "y": 35
           },
           "id": 38,
           "interval": "5m",
@@ -1618,7 +1618,7 @@
                 "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
-              "expr": "avg_over_time(\n    min(\n        rate(container_cpu_usage_seconds_total{namespace=\"$namespace\", pod=~\"($deployment|$daemonset|$statefulset).+\"}[1m])\n        * on(pod) group_left(image) kube_pod_container_info{namespace=\"$namespace\", pod=~\"($deployment|$daemonset|$statefulset).+\", container_id=~\".+\"}\n    ) by (image)\n[5m :] )* 1000",
+              "expr": "avg_over_time(\n    min(\n        rate(container_cpu_usage_seconds_total{namespace=\"$namespace\", pod=~\"($deployment|$daemonset|$statefulset).+\", container!=\"\"}[1m])\n        * on(pod) group_left(image) kube_pod_container_info{namespace=\"$namespace\", pod=~\"($deployment|$daemonset|$statefulset).+\", container_id=~\".+\"}\n    ) by (image)\n[5m :] )* 1000",
               "instant": false,
               "legendFormat": "min: {{image}}",
               "range": true,
@@ -1725,7 +1725,7 @@
             "h": 7,
             "w": 8,
             "x": 16,
-            "y": 22
+            "y": 35
           },
           "id": 40,
           "interval": "5m",
@@ -1757,7 +1757,7 @@
                 "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
-              "expr": "avg_over_time(\n    avg(\n        rate(container_cpu_usage_seconds_total{namespace=\"$namespace\", pod=~\"($deployment|$daemonset|$statefulset).+\"}[1m])\n        * on(pod) group_left(image) kube_pod_container_info{namespace=\"$namespace\", pod=~\"($deployment|$daemonset|$statefulset).+\", container_id=~\".+\"}\n    ) by (image)\n[5m :] )* 1000",
+              "expr": "avg_over_time(\n    avg(\n        rate(container_cpu_usage_seconds_total{namespace=\"$namespace\", pod=~\"($deployment|$daemonset|$statefulset).+\", container!=\"\"}[1m])\n        * on(pod) group_left(image) kube_pod_container_info{namespace=\"$namespace\", pod=~\"($deployment|$daemonset|$statefulset).+\", container_id=~\".+\"}\n    ) by (image)\n[5m :] )* 1000",
               "instant": false,
               "legendFormat": "avg: {{image}}",
               "range": true,
@@ -1866,7 +1866,7 @@
             "h": 7,
             "w": 8,
             "x": 0,
-            "y": 29
+            "y": 42
           },
           "id": 46,
           "interval": "60s",
@@ -1897,7 +1897,7 @@
                 "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
-              "expr": "avg_over_time(\nmax(\n    rate(container_cpu_cfs_throttled_periods_total{namespace=\"$namespace\", pod=~'($deployment|$daemonset|$statefulset).+', image!='', container!='POD'}[1m])\n    / rate(container_cpu_cfs_periods_total{namespace=\"$namespace\", pod=~'($deployment|$daemonset|$statefulset).+', image!='', container!='POD'}[1m])\n    * on(pod) group_left(created_by_name) group(kube_pod_info{namespace=\"$namespace\", created_by_name=~'($deployment.+|$daemonset|$statefulset)', pod_ip=~\".+\"}) by (image, pod)\n) by (image)\n[5m:])",
+              "expr": "avg_over_time(\nmax(\n    rate(container_cpu_cfs_throttled_periods_total{namespace=\"$namespace\", pod=~'($deployment|$daemonset|$statefulset).+', image!=''}[1m])\n    / rate(container_cpu_cfs_periods_total{namespace=\"$namespace\", pod=~'($deployment|$daemonset|$statefulset).+', image!=''}[1m])\n    * on(pod) group_left(created_by_name) group(kube_pod_info{namespace=\"$namespace\", created_by_name=~'($deployment.+|$daemonset|$statefulset)', pod_ip=~\".+\"}) by (image, pod)\n) by (image)\n[5m:])",
               "instant": false,
               "legendFormat": "max: {{image}}",
               "range": true,
@@ -1909,7 +1909,7 @@
                 "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
-              "expr": "avg_over_time(\nmax(\n    rate(container_cpu_cfs_throttled_periods_total{namespace=\"$namespace\", pod=~'($deployment|$daemonset|$statefulset).+', image!='', container!='POD'}[1m] offset ${cpu_offset})\n    / rate(container_cpu_cfs_periods_total{namespace=\"$namespace\", pod=~'($deployment|$daemonset|$statefulset).+', image!='', container!='POD'}[1m] offset ${cpu_offset})\n    * on(pod) group_left(created_by_name) group(kube_pod_info{namespace=\"$namespace\", created_by_name=~'($deployment.+|$daemonset|$statefulset)', pod_ip=~\".+\"} offset ${cpu_offset}) by (image, pod)\n) by (image)\n[5m:])",
+              "expr": "avg_over_time(\nmax(\n    rate(container_cpu_cfs_throttled_periods_total{namespace=\"$namespace\", pod=~'($deployment|$daemonset|$statefulset).+', image!=''}[1m] offset ${cpu_offset})\n    / rate(container_cpu_cfs_periods_total{namespace=\"$namespace\", pod=~'($deployment|$daemonset|$statefulset).+', image!=''}[1m] offset ${cpu_offset})\n    * on(pod) group_left(created_by_name) group(kube_pod_info{namespace=\"$namespace\", created_by_name=~'($deployment.+|$daemonset|$statefulset)', pod_ip=~\".+\"} offset ${cpu_offset}) by (image, pod)\n) by (image)\n[5m:])",
               "instant": false,
               "legendFormat": "offset max: {{image}}",
               "range": true,
@@ -2006,7 +2006,7 @@
             "h": 7,
             "w": 8,
             "x": 8,
-            "y": 29
+            "y": 42
           },
           "id": 45,
           "interval": "60s",
@@ -2037,7 +2037,7 @@
                 "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
-              "expr": "avg_over_time(\nmin(\n    rate(container_cpu_cfs_throttled_periods_total{namespace=\"$namespace\", pod=~'($deployment|$daemonset|$statefulset).+', image!='', container!='POD'}[1m])\n    / rate(container_cpu_cfs_periods_total{namespace=\"$namespace\", pod=~'($deployment|$daemonset|$statefulset).+', image!='', container!='POD'}[1m])\n    * on(pod) group_left(created_by_name) group(kube_pod_info{namespace=\"$namespace\", created_by_name=~'($deployment.+|$daemonset|$statefulset)', pod_ip=~\".+\"}) by (image, pod)\n) by (image)\n[5m:])",
+              "expr": "avg_over_time(\nmin(\n    rate(container_cpu_cfs_throttled_periods_total{namespace=\"$namespace\", pod=~'($deployment|$daemonset|$statefulset).+', image!=''}[1m])\n    / rate(container_cpu_cfs_periods_total{namespace=\"$namespace\", pod=~'($deployment|$daemonset|$statefulset).+', image!=''}[1m])\n    * on(pod) group_left(created_by_name) group(kube_pod_info{namespace=\"$namespace\", created_by_name=~'($deployment.+|$daemonset|$statefulset)', pod_ip=~\".+\"}) by (image, pod)\n) by (image)\n[5m:])",
               "instant": false,
               "legendFormat": "min: {{image}}",
               "range": true,
@@ -2146,7 +2146,7 @@
             "h": 7,
             "w": 8,
             "x": 16,
-            "y": 29
+            "y": 42
           },
           "id": 44,
           "interval": "60s",
@@ -2177,7 +2177,7 @@
                 "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
-              "expr": "avg_over_time(\navg(\n    rate(container_cpu_cfs_throttled_periods_total{namespace=\"$namespace\", pod=~'($deployment|$daemonset|$statefulset).+', image!='', container!='POD'}[1m])\n    / rate(container_cpu_cfs_periods_total{namespace=\"$namespace\", pod=~'($deployment|$daemonset|$statefulset).+', image!='', container!='POD'}[1m])\n    * on(pod) group_left(created_by_name) group(kube_pod_info{namespace=\"$namespace\", created_by_name=~'($deployment.+|$daemonset|$statefulset)', pod_ip=~\".+\"}) by (image, pod)\n) by (image)\n[5m:])",
+              "expr": "avg_over_time(\navg(\n    rate(container_cpu_cfs_throttled_periods_total{namespace=\"$namespace\", pod=~'($deployment|$daemonset|$statefulset).+', image!=''}[1m])\n    / rate(container_cpu_cfs_periods_total{namespace=\"$namespace\", pod=~'($deployment|$daemonset|$statefulset).+', image!=''}[1m])\n    * on(pod) group_left(created_by_name) group(kube_pod_info{namespace=\"$namespace\", created_by_name=~'($deployment.+|$daemonset|$statefulset)', pod_ip=~\".+\"}) by (image, pod)\n) by (image)\n[5m:])",
               "instant": false,
               "legendFormat": "avg: {{image}}",
               "range": true,
@@ -2189,7 +2189,7 @@
                 "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
-              "expr": "avg_over_time(\navg(\n    rate(container_cpu_cfs_throttled_periods_total{namespace=\"$namespace\", pod=~'($deployment|$daemonset|$statefulset).+', image!='', container!='POD'}[1m] offset ${cpu_offset})\n    / rate(container_cpu_cfs_periods_total{namespace=\"$namespace\", pod=~'($deployment|$daemonset|$statefulset).+', image!='', container!='POD'}[1m] offset ${cpu_offset})\n    * on(pod) group_left(created_by_name) group(kube_pod_info{namespace=\"$namespace\", created_by_name=~'($deployment.+|$daemonset|$statefulset)', pod_ip=~\".+\"} offset ${cpu_offset}) by (image, pod)\n) by (image)\n[5m:])",
+              "expr": "avg_over_time(\navg(\n    rate(container_cpu_cfs_throttled_periods_total{namespace=\"$namespace\", pod=~'($deployment|$daemonset|$statefulset).+', image!=''}[1m] offset ${cpu_offset})\n    / rate(container_cpu_cfs_periods_total{namespace=\"$namespace\", pod=~'($deployment|$daemonset|$statefulset).+', image!=''}[1m] offset ${cpu_offset})\n    * on(pod) group_left(created_by_name) group(kube_pod_info{namespace=\"$namespace\", created_by_name=~'($deployment.+|$daemonset|$statefulset)', pod_ip=~\".+\"} offset ${cpu_offset}) by (image, pod)\n) by (image)\n[5m:])",
               "instant": false,
               "legendFormat": "offset avg: {{image}}",
               "range": true,

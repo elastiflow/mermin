@@ -67,5 +67,6 @@
 * [Development Workflow](contributor-guide/development-workflow.md)
 * [Debugging eBPF](contributor-guide/debugging-ebpf.md)
 * [Debugging Network](contributor-guide/debugging-network.md)
+* [Local Performance Testing](contributor-guide/local-performance-testing.md)
 * [Code of Conduct](CODE-OF-CONDUCT.md)
 * [Security Policy](SECURITY.md)
