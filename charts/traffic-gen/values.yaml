@@ -51,12 +51,14 @@ hey:
     targetURL: "http://backend-podinfo:9898"
     timeoutSeconds: 10
     duration: 600s
-    concurrency: 10 # worker count
-    qps: 10 # per worker
+    # worker count
+    concurrency: 10
+    # QPS per worker
+    qps: 10
 
   cronjob:
     enabled: false
-    schedule: "*/3 * * * *" # every 3 minutes
+    schedule: "*/3 * * * *"
     concurrencyPolicy: "Forbid"
     failedJobsHistoryLimit: 2
     successfulJobsHistoryLimit: 1
@@ -83,15 +85,17 @@ hey:
     targetURL: "http://backend-podinfo:9898"
     timeoutSeconds: 10
     duration: 120s
-    concurrency: 10 # worker count
-    qps: 10 # per worker
+    # worker count
+    concurrency: 10
+    # QPS per worker
+    qps: 10
 
 # Create dummy K8s objects to simulate cluster activity
 dummy:
   # Cronjob just sleeps between 0.1 and 3.9 seconds.
   cronjob:
     enabled: true
-    schedule: "*/1 * * * *" # every 3 minutes
+    schedule: "*/1 * * * *"
     concurrencyPolicy: "Forbid"
     failedJobsHistoryLimit: 2
     successfulJobsHistoryLimit: 1
