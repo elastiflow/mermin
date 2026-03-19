@@ -1,0 +1,77 @@
+{{- if .Values.dummy.cronjob.enabled -}}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dummy-pods
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dummy-pods
+  namespace: dummy-pods
+  labels:
+    {{- include "traffic-gen.labels" $ | nindent 4 }}
+spec:
+  schedule: {{ .Values.dummy.cronjob.schedule | quote }}
+  concurrencyPolicy: {{ .Values.dummy.cronjob.concurrencyPolicy }}
+  failedJobsHistoryLimit: {{ .Values.dummy.cronjob.failedJobsHistoryLimit }}
+  successfulJobsHistoryLimit: {{ .Values.dummy.cronjob.successfulJobsHistoryLimit }}
+  startingDeadlineSeconds: {{ .Values.dummy.cronjob.startingDeadlineSeconds }}
+  suspend: {{ .Values.dummy.cronjob.suspend }}
+  jobTemplate:
+    metadata:
+      {{- with $.Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "traffic-gen.labels" $ | nindent 8 }}
+    spec:
+      parallelism: {{ .Values.dummy.cronjob.parallelism }}
+      activeDeadlineSeconds: {{ .Values.dummy.cronjob.activeDeadlineSeconds }}
+      backoffLimit:  {{ .Values.dummy.cronjob.backoffLimit }}
+      ttlSecondsAfterFinished: {{ .Values.dummy.cronjob.ttlSecondsAfterFinished }}
+      completionMode: {{ .Values.dummy.cronjob.completionMode }}
+      completions: {{ .Values.dummy.cronjob.completions }}
+      template:
+        metadata:
+          {{- with $.Values.podAnnotations }}
+          annotations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          labels:
+            {{- include "traffic-gen.labels" $ | nindent 12 }}
+            {{- with .Values.podLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+        spec:
+          securityContext:
+            {{- toYaml $.Values.podSecurityContext | nindent 12 }}
+          restartPolicy: Never
+          dnsPolicy: {{ .Values.dnsPolicy }}
+          terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+          containers:
+            - name: {{ .Chart.Name }}
+              image: "alpine:latest"
+              imagePullPolicy: {{ $.Values.image.pullPolicy }}
+              command:
+                - "sh"
+                - "-c"
+              args:
+                - |
+                  sleep $(shuf -n 1 -i 0-3).$(shuf -n 1 -i 1-9)
+                  echo "Hello from dummy cronjob! Time: $(date)"
+              securityContext:
+                {{- toYaml $.Values.securityContext | nindent 16 }}
+              resources:
+                {{- .Values.dummy.cronjob.resources | toYaml | nindent 16 }}
+          {{- with $.Values.affinity }}
+          affinity:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $.Values.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+---
+{{- end }}

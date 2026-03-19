@@ -1,0 +1,18 @@
+apiVersion: v2
+name: traffic-gen
+description: |
+  A Helm chart for deploying the dummy traffic generator.
+  Should be used for debugging and testing purposes only.
+type: application
+version: 0.0.1
+appVersion: "0.0.1"
+sources:
+  - https://github.com/elastiflow/mermin
+maintainers:
+  - name: ElastiFlow Engineering Team
+    email: engineering@elastiflow.com
+keywords:
+  - netflow
+  - network
+  - flow
+  - observability

@@ -1,0 +1,115 @@
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  repository: mack/rakyll-hey
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+# global common labels, applied to all resources
+commonLabels: {}
+
+podAnnotations: {}
+podLabels: {}
+
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: "50%"
+    maxSurge: 0
+
+dnsPolicy: ClusterFirst
+terminationGracePeriodSeconds: 30
+
+podSecurityContext:
+  runAsNonRoot: false
+
+securityContext:
+  privileged: false
+  readOnlyRootFilesystem: false
+  runAsNonRoot: false
+  runAsUser: 0
+  runAsGroup: 0
+
+tolerations: []
+affinity: {}
+
+hey:
+  deployment:
+    enabled: true
+    replicas: 10
+
+    resources:
+      requests:
+        cpu: 300m
+        memory: 256Mi
+      limits:
+        cpu: 300m
+        memory: 256Mi
+
+    # Hey params
+    targetURL: "http://backend-podinfo.default.svc.cluster.local:9898"
+    timeoutSeconds: 10
+    duration: 600s
+    concurrency: 10 # worker count
+    qps: 10 # per worker
+
+  cronjob:
+    enabled: false
+    schedule: "*/3 * * * *" # every 3 minutes
+    concurrencyPolicy: "Forbid"
+    failedJobsHistoryLimit: 2
+    successfulJobsHistoryLimit: 1
+    startingDeadlineSeconds: 20
+    suspend: false
+
+    # Job params
+    parallelism: 10
+    completions: 10
+    completionMode: "Indexed"
+    activeDeadlineSeconds: 150
+    backoffLimit: 0
+    ttlSecondsAfterFinished: 900
+
+    resources:
+      requests:
+        cpu: 150m
+        memory: 128Mi
+      limits:
+        cpu: 150m
+        memory: 128Mi
+
+    # Hey params
+    targetURL: "http://backend-podinfo.default.svc.cluster.local:9898"
+    timeoutSeconds: 10
+    duration: 120s
+    concurrency: 10 # worker count
+    qps: 10 # per worker
+
+# Create dummy K8s objects to simulate cluster activity
+dummy:
+  # Cronjob just sleeps between 0.1 and 3.9 seconds.
+  cronjob:
+    enabled: true
+    schedule: "*/1 * * * *" # every 3 minutes
+    concurrencyPolicy: "Forbid"
+    failedJobsHistoryLimit: 2
+    successfulJobsHistoryLimit: 1
+    startingDeadlineSeconds: 20
+    suspend: false
+
+    # Job params
+    parallelism: 20
+    completions: 160
+    completionMode: "NonIndexed"
+    activeDeadlineSeconds: 120
+    backoffLimit: 0
+    ttlSecondsAfterFinished: 300
+
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        cpu: 10m
+        memory: 32Mi

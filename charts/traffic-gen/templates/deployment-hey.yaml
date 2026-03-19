@@ -1,0 +1,65 @@
+{{- if .Values.hey.deployment.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "traffic-gen.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "traffic-gen.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.hey.deployment.replicas }}
+  strategy:
+    {{- .Values.strategy | toYaml | nindent 4 }}
+  selector:
+    matchLabels:
+      {{- include "traffic-gen.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- if or .Values.podAnnotations }}
+      annotations:
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- end }}
+      labels:
+        {{- include "traffic-gen.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      dnsPolicy: {{ .Values.dnsPolicy }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - "/usr/local/bin/hey"
+          args:
+            - "-disable-keepalive"
+            - "-t"
+            - {{ .Values.hey.deployment.timeoutSeconds | quote }}
+            - "-z"
+            - {{ .Values.hey.deployment.duration | quote }}
+            - "-c"
+            - {{ .Values.hey.deployment.concurrency | quote}}
+            - "-q"
+            - {{ .Values.hey.deployment.qps | quote }}
+            - "{{ .Values.hey.deployment.targetURL }}"
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          {{- with .Values.hey.deployment.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+{{- end }}
