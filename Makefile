@@ -6,4 +6,4 @@ include makefiles/*.mk
 ############################################
 # All custom targets goes after this line
 ############################################
-include hack/local-performance-testing/*.mk
+include hack/local-perf-testing/*.mk

@@ -1,20 +1,21 @@
-# mermin Helm Chart
+# traffic-gen Helm Chart
 
-- [mermin Helm Chart](#mermin-helm-chart)
+- [traffic-gen Helm Chart](#traffic-gen-helm-chart)
   - [Overview](#overview)
   - [Installation](#installation)
   - [Configuration](#configuration)
 
 ## Overview
 
-Mermin is a Kubernetes-native network observability tool that uses eBPF to capture network traffic and export it as Flow Traces via the OpenTelemetry Protocol (OTLP).
+This is a dummy traffic generator ([`hey`](https://github.com/rakyll/hey)) and a cronjob with dummy pods that sleep for `0.1` - `3.9` seconds.
+
+- The traffic generator can be ran via deployment and/or cronjob.
+- A cronjob with dummy pods iis used to simulate cluster activity
 
 ## Installation
 
 ```sh
-helm repo add mermin https://elastiflow.github.io/mermin/
-helm repo update
-helm install mermin mermin/mermin
+helm install traffic-gen charts/traffic-gen
 ```
 
 ## Configuration

@@ -37,7 +37,7 @@ lpt-build:
 	@kind load docker-image mermin:latest --name atlantis
 
 .PHONY: lpt-build-restart
-lpt-build: lpt-build
+lpt-build-restart: lpt-build
 	$(call log_info,Restarting Mermin daemonset to pick up new image)
 	@kubectl rollout restart daemonset/mermin -n default
 	@kubectl rollout status --watch --timeout 120 daemonset/mermin -n default
@@ -55,7 +55,7 @@ lpt-mermin-otel:
 	$(call log_info,Installing Mermin helm chart with OpenTelemetry)
 	helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
 	helm upgrade --install --wait --timeout 120s -n default \
-		-f values_otel.yaml \
+		-f docs/deployment/examples/local-otel/values_otel.yaml \
 		otel-collector open-telemetry/opentelemetry-collector
 	$(MAKE) helm-upgrade HELM_EXTRA_ARGS='--set-file config.content=docs/deployment/examples/local-otel/config.hcl'
 
@@ -103,5 +103,5 @@ lpt-doc:
 ########################
 # Convenience targets
 ########################
-.PHONY: lpt-all
-lpt-all: lpt-build lpt-mon lpt-mermin lpt-sample-be lpt-traffic-gen lpt-doc
+.PHONY: lpt-up
+lpt-up: lpt-build lpt-mon lpt-mermin lpt-sample-be lpt-traffic-gen lpt-doc

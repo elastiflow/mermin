@@ -41,14 +41,14 @@ hey:
 
     resources:
       requests:
-        cpu: 300m
-        memory: 256Mi
+        cpu: 150m
+        memory: 128Mi
       limits:
-        cpu: 300m
+        cpu: 150m
         memory: 256Mi
 
     # Hey params
-    targetURL: "http://backend-podinfo.default.svc.cluster.local:9898"
+    targetURL: "http://backend-podinfo:9898"
     timeoutSeconds: 10
     duration: 600s
     concurrency: 10 # worker count
@@ -80,7 +80,7 @@ hey:
         memory: 128Mi
 
     # Hey params
-    targetURL: "http://backend-podinfo.default.svc.cluster.local:9898"
+    targetURL: "http://backend-podinfo:9898"
     timeoutSeconds: 10
     duration: 120s
     concurrency: 10 # worker count
