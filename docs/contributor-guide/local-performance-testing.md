@@ -55,7 +55,7 @@ To teardown the environment (delete Kind cluster) run
 make lpt-kind-delete
 ```
 
-### Mermin source, config and values
+### Mermin config and values
 
 The "local" values and config is used for Mermin, in order to modify them make changes to
 
