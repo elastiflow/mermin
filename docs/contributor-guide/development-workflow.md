@@ -321,6 +321,13 @@ colima --profile atlantis start
 colima --profile atlantis stop
 ```
 
+If you get a `to create fsnotify watcher: too many open files` error while tailing the logs, increase the limits:
+
+```shell
+colima ssh -- sudo sysctl fs.inotify.max_user_watches=524288
+colima ssh -- sudo sysctl fs.inotify.max_user_instances=512
+```
+
 ### Build and Run Mermin
 
 ```shell

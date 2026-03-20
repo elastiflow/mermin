@@ -1,4 +1,11 @@
 image:
   repository: mermin
   tag: latest
-  # pullPolicy: Never # Uncomment to build the image locally
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    cpu: 200m
+    memory: 512Mi

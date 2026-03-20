@@ -1,0 +1,78 @@
+{{- if .Values.hey.cronjob.enabled -}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "traffic-gen.fullname" . }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "traffic-gen.labels" $ | nindent 4 }}
+spec:
+  schedule: {{ .Values.hey.cronjob.schedule | quote }}
+  concurrencyPolicy: {{ .Values.hey.cronjob.concurrencyPolicy }}
+  failedJobsHistoryLimit: {{ .Values.hey.cronjob.failedJobsHistoryLimit }}
+  successfulJobsHistoryLimit: {{ .Values.hey.cronjob.successfulJobsHistoryLimit }}
+  startingDeadlineSeconds: {{ .Values.hey.cronjob.startingDeadlineSeconds }}
+  suspend: {{ .Values.hey.cronjob.suspend }}
+  jobTemplate:
+    metadata:
+      {{- with $.Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "traffic-gen.labels" $ | nindent 8 }}
+    spec:
+      parallelism: {{ .Values.hey.cronjob.parallelism }}
+      activeDeadlineSeconds: {{ .Values.hey.cronjob.activeDeadlineSeconds }}
+      backoffLimit:  {{ .Values.hey.cronjob.backoffLimit }}
+      ttlSecondsAfterFinished: {{ .Values.hey.cronjob.ttlSecondsAfterFinished }}
+      completionMode: {{ .Values.hey.cronjob.completionMode }}
+      completions: {{ .Values.hey.cronjob.completions }}
+      template:
+        metadata:
+          {{- with $.Values.podAnnotations }}
+          annotations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          labels:
+            {{- include "traffic-gen.labels" $ | nindent 12 }}
+            {{- with .Values.podLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+        spec:
+          securityContext:
+            {{- toYaml $.Values.podSecurityContext | nindent 12 }}
+          restartPolicy: Never
+          dnsPolicy: {{ .Values.dnsPolicy }}
+          terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+          containers:
+            - name: {{ .Chart.Name }}
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+              imagePullPolicy: {{ $.Values.image.pullPolicy }}
+              command:
+                - "/usr/local/bin/hey"
+              args:
+                - "-disable-keepalive"
+                - "-t"
+                - {{ .Values.hey.cronjob.timeoutSeconds | quote }}
+                - "-z"
+                - {{ .Values.hey.cronjob.duration | quote }}
+                - "-c"
+                - {{ .Values.hey.cronjob.concurrency | quote }}
+                - "-q"
+                - {{ .Values.hey.cronjob.qps | quote }}
+                - "{{ .Values.hey.cronjob.targetURL }}"
+              securityContext:
+                {{- toYaml $.Values.securityContext | nindent 16 }}
+              resources:
+                {{- .Values.hey.cronjob.resources | toYaml | nindent 16 }}
+          {{- with $.Values.affinity }}
+          affinity:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $.Values.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+---
+{{- end }}

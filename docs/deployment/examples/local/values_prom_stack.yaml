@@ -37,6 +37,25 @@ grafana:
             httpMethod: POST
             timeInterval: 30s
 
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+      - name: 'default'
+        orgId: 1
+        folder: ''
+        type: file
+        disableDeletion: false
+        editable: true
+        allowUiUpdates: true
+        options:
+          path: /var/lib/grafana/dashboards/default
+
+  dashboards:
+    default:
+      mermin:
+        url: https://raw.githubusercontent.com/elastiflow/mermin/refs/heads/main/docs/internal-monitoring/grafana-mermin-app.json
+
   grafana.ini:
     auth.anonymous:
       enabled: true
