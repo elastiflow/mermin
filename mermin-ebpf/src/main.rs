@@ -102,7 +102,7 @@ use mermin_common::FlowEvent;
 #[cfg(not(feature = "test"))]
 use mermin_common::LogEntry;
 use mermin_common::{
-    ConnectionState, Direction, FlowKey, FlowStats, IpVersion, eth,
+    ConnectionState, Direction, FlowKey, FlowStats, IpVersion, EbpfError, eth,
     eth::EtherType,
     icmp,
     ip::{IpProto, ipv4, ipv6},
@@ -193,30 +193,6 @@ static mut FLOW_KEY_SCRATCH: PerCpuArray<FlowKey> = PerCpuArray::with_max_entrie
 static mut LISTENING_PORTS: HashMap<mermin_common::ListeningPortKey, u8> =
     HashMap::with_max_entries(1024, 0);
 
-/// Error types that can occur during packet parsing.
-///
-/// Error logs are emitted with human-readable descriptions including the specific header type
-/// and error reason (e.g., "parser failed: IPv4 header out of bounds").
-///
-/// ## Error Types
-///
-/// - **OutOfBounds** - Packet data access beyond available length
-/// - **MalformedHeader** - Header structure is invalid or corrupted
-/// - **Unsupported** - Protocol/header type not currently supported
-/// - **InternalError** - Map access failure or internal state error
-///
-/// Discriminant values match `LogErrorCode` in mermin-common for userspace decoding.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub enum Error {
-    OutOfBounds = 0,
-    MalformedHeader = 1,
-    InternalError = 2,
-    UnsupportedEtherType = 3,
-    UnsupportedProtocol = 4,
-    FlowEventDropped = 5,
-}
-
 /// Log level constants matching LogLevel enum in mermin-common.
 ///
 /// Only levels actually used in `log_error()` are defined here.
@@ -231,11 +207,15 @@ const LOG_LEVEL_ERROR: u8 = 4;
 /// Log errors at appropriate severity levels via ring buffer.
 #[cfg(not(feature = "test"))]
 #[inline(always)]
-fn log_error(ctx: &TcContext, err: Error, direction: Direction) {
+fn log_error(ctx: &TcContext, err: EbpfError, direction: Direction) {
     let level = match err {
-        Error::OutOfBounds | Error::MalformedHeader | Error::InternalError => LOG_LEVEL_ERROR,
-        Error::FlowEventDropped => LOG_LEVEL_WARN,
-        Error::UnsupportedEtherType | Error::UnsupportedProtocol => LOG_LEVEL_TRACE,
+        EbpfError::OutOfBounds
+        | EbpfError::MalformedHeader
+        | EbpfError::InternalError
+        | EbpfError::ScratchUnavailable
+        | EbpfError::MapInsertFailed => LOG_LEVEL_ERROR,
+        EbpfError::FlowEventDropped => LOG_LEVEL_WARN,
+        EbpfError::UnsupportedEtherType | EbpfError::UnsupportedProtocol => LOG_LEVEL_TRACE,
     };
 
     // Try to reserve space in the log ring buffer
@@ -622,10 +602,10 @@ fn update_tcp_timing(
 #[cfg(not(feature = "test"))]
 #[inline(always)]
 #[allow(static_mut_refs)]
-fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
+fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, EbpfError> {
     // Use per-CPU scratch space for FlowKey parsing (avoids stack overflow)
     #[allow(static_mut_refs)]
-    let flow_key_ptr = unsafe { FLOW_KEY_SCRATCH.get_ptr_mut(0).ok_or(Error::OutOfBounds)? };
+    let flow_key_ptr = unsafe { FLOW_KEY_SCRATCH.get_ptr_mut(0).ok_or(EbpfError::ScratchUnavailable)? };
     let flow_key = unsafe { &mut *flow_key_ptr };
     let (eth_type, l4_offset) = parse_flow_key(ctx, flow_key)?;
 
@@ -651,7 +631,7 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
         let flow_stats = unsafe {
             FLOW_STATS_SCRATCH
                 .get_ptr_mut(0)
-                .ok_or(Error::OutOfBounds)?
+                .ok_or(EbpfError::ScratchUnavailable)?
         };
         unsafe { core::ptr::write_bytes(flow_stats, 0, 1) };
         let stats = unsafe { &mut *flow_stats };
@@ -682,7 +662,7 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
         if stats.protocol == IpProto::Tcp {
             let current_flags: tcp::Flags = ctx
                 .load(l4_offset + tcp::TCP_FLAGS_OFFSET)
-                .map_err(|_| Error::OutOfBounds)?;
+                .map_err(|_| EbpfError::OutOfBounds)?;
             stats.tcp_flags |= current_flags;
             stats.tcp_state = determine_tcp_state(stats.tcp_state, current_flags, direction);
             if stats.forward_tcp_flags == 0 {
@@ -696,7 +676,7 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
             #[allow(static_mut_refs)]
             FLOW_STATS
                 .insert(&normalized_key, &*stats, 0)
-                .map_err(|_| Error::OutOfBounds)?;
+                .map_err(|_| EbpfError::MapInsertFailed)?;
         }
 
         // stats_ptr intentionally left as None — the existing-flow update block below
@@ -746,13 +726,13 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
         if stats.protocol == IpProto::Tcp {
             let current_flags: tcp::Flags = ctx
                 .load(l4_offset + tcp::TCP_FLAGS_OFFSET)
-                .map_err(|_| Error::OutOfBounds)?;
+                .map_err(|_| EbpfError::OutOfBounds)?;
             stats.tcp_flags |= current_flags;
             stats.tcp_state = determine_tcp_state(stats.tcp_state, current_flags, direction);
 
             let data_offset: tcp::OffRes = ctx
                 .load(l4_offset + tcp::TCP_OFF_RES_OFFSET)
-                .map_err(|_| Error::OutOfBounds)?;
+                .map_err(|_| EbpfError::OutOfBounds)?;
             let tcp_hdr_len = tcp::hdr_len(data_offset);
             let tcp_payload_offset = (l4_offset + tcp_hdr_len) as u32;
 
@@ -778,7 +758,7 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
             let Some(flow_event_ptr) = flow_event_ptr else {
                 // Must discard the ring buffer reservation before returning error
                 event.discard(0);
-                return Err(Error::OutOfBounds);
+                return Err(EbpfError::ScratchUnavailable);
             };
             unsafe { core::ptr::write_bytes(flow_event_ptr, 0, 1) };
             let flow_event = unsafe { &mut *flow_event_ptr };
@@ -804,7 +784,7 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
         } else {
             // The flow is still tracked in FLOW_STATS, but userspace won't get
             // initial packet data for deep inspection.
-            log_error(ctx, Error::FlowEventDropped, direction);
+            log_error(ctx, EbpfError::FlowEventDropped, direction);
         }
     }
 
@@ -824,9 +804,9 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
 ///
 /// This function uses bounded loops to satisfy old kernel verifiers (5.14+).
 #[inline(always)]
-fn parse_flow_key(ctx: &TcContext, key: &mut FlowKey) -> Result<(EtherType, usize), Error> {
+fn parse_flow_key(ctx: &TcContext, key: &mut FlowKey) -> Result<(EtherType, usize), EbpfError> {
     if eth::ETH_LEN > ctx.len() as usize {
-        return Err(Error::MalformedHeader);
+        return Err(EbpfError::MalformedHeader);
     }
 
     key.src_ip = [0u8; 16];
@@ -840,90 +820,90 @@ fn parse_flow_key(ctx: &TcContext, key: &mut FlowKey) -> Result<(EtherType, usiz
 
     let eth_type: EtherType = ctx
         .load(eth::ETH_ETHER_TYPE_OFFSET)
-        .map_err(|_| Error::OutOfBounds)?;
+        .map_err(|_| EbpfError::OutOfBounds)?;
     offset += eth::ETH_LEN;
 
     offset = match eth_type {
         EtherType::Ipv4 => {
             if offset + ipv4::IPV4_LEN > ctx.len() as usize {
-                return Err(Error::OutOfBounds);
+                return Err(EbpfError::OutOfBounds);
             }
             let ihl = ipv4::ihl(
                 ctx.load::<ipv4::Vihl>(offset)
-                    .map_err(|_| Error::OutOfBounds)?,
+                    .map_err(|_| EbpfError::OutOfBounds)?,
             ) as usize;
             if ihl < ipv4::IPV4_LEN {
-                return Err(Error::MalformedHeader);
+                return Err(EbpfError::MalformedHeader);
             }
 
             key.ip_version = IpVersion::V4;
             key.protocol = ctx
                 .load(offset + ipv4::IPV4_PROTOCOL_OFFSET)
-                .map_err(|_| Error::OutOfBounds)?;
+                .map_err(|_| EbpfError::OutOfBounds)?;
 
             let src_ipv4: [u8; 4] = ctx
                 .load(offset + ipv4::IPV4_SRC_ADDR_OFFSET)
-                .map_err(|_| Error::OutOfBounds)?;
+                .map_err(|_| EbpfError::OutOfBounds)?;
             key.src_ip[0..4].copy_from_slice(&src_ipv4);
             let dst_ipv4: [u8; 4] = ctx
                 .load(offset + ipv4::IPV4_DST_ADDR_OFFSET)
-                .map_err(|_| Error::OutOfBounds)?;
+                .map_err(|_| EbpfError::OutOfBounds)?;
             key.dst_ip[0..4].copy_from_slice(&dst_ipv4);
 
             offset + ihl
         }
         EtherType::Ipv6 => {
             if offset + ipv6::IPV6_LEN > ctx.len() as usize {
-                return Err(Error::OutOfBounds);
+                return Err(EbpfError::OutOfBounds);
             }
 
             key.ip_version = IpVersion::V6;
             key.protocol = ctx
                 .load(offset + ipv6::IPV6_NEXT_HDR_OFFSET)
-                .map_err(|_| Error::OutOfBounds)?;
+                .map_err(|_| EbpfError::OutOfBounds)?;
             key.src_ip = ctx
                 .load(offset + ipv6::IPV6_SRC_ADDR_OFFSET)
-                .map_err(|_| Error::OutOfBounds)?;
+                .map_err(|_| EbpfError::OutOfBounds)?;
             key.dst_ip = ctx
                 .load(offset + ipv6::IPV6_DST_ADDR_OFFSET)
-                .map_err(|_| Error::OutOfBounds)?;
+                .map_err(|_| EbpfError::OutOfBounds)?;
             offset + ipv6::IPV6_LEN
         }
-        _ => return Err(Error::UnsupportedEtherType),
+        _ => return Err(EbpfError::UnsupportedEtherType),
     };
 
     match key.protocol {
         IpProto::Tcp => {
             if offset + tcp::TCP_LEN > ctx.len() as usize {
-                return Err(Error::OutOfBounds);
+                return Err(EbpfError::OutOfBounds);
             }
 
             key.src_port = tcp::src_port(
                 ctx.load(offset + tcp::TCP_SRC_PORT_OFFSET)
-                    .map_err(|_| Error::OutOfBounds)?,
+                    .map_err(|_| EbpfError::OutOfBounds)?,
             );
             key.dst_port = tcp::dst_port(
                 ctx.load(offset + tcp::TCP_DST_PORT_OFFSET)
-                    .map_err(|_| Error::OutOfBounds)?,
+                    .map_err(|_| EbpfError::OutOfBounds)?,
             );
         }
         IpProto::Udp => {
             if offset + udp::UDP_LEN > ctx.len() as usize {
-                return Err(Error::OutOfBounds);
+                return Err(EbpfError::OutOfBounds);
             }
 
             key.src_port = udp::src_port(
                 ctx.load(offset + udp::UDP_SRC_PORT_OFFSET)
-                    .map_err(|_| Error::OutOfBounds)?,
+                    .map_err(|_| EbpfError::OutOfBounds)?,
             );
             key.dst_port = udp::dst_port(
                 ctx.load(offset + udp::UDP_DST_PORT_OFFSET)
-                    .map_err(|_| Error::OutOfBounds)?,
+                    .map_err(|_| EbpfError::OutOfBounds)?,
             );
         }
         IpProto::Icmp | IpProto::Ipv6Icmp => {
             if offset + icmp::ICMP_LEN > ctx.len() as usize {
-                return Err(Error::OutOfBounds);
+                return Err(EbpfError::OutOfBounds);
             }
 
             // ICMP has no ports, so map type/code to port fields for Community ID compatibility
@@ -931,16 +911,16 @@ fn parse_flow_key(ctx: &TcContext, key: &mut FlowKey) -> Result<(EtherType, usiz
             // Reference: https://github.com/corelight/community-id-spec
             let icmp_type: u8 = ctx
                 .load(offset + icmp::ICMP_TYPE_OFFSET)
-                .map_err(|_| Error::OutOfBounds)?;
+                .map_err(|_| EbpfError::OutOfBounds)?;
             let icmp_code: u8 = ctx
                 .load(offset + icmp::ICMP_CODE_OFFSET)
-                .map_err(|_| Error::OutOfBounds)?;
+                .map_err(|_| EbpfError::OutOfBounds)?;
 
             key.src_port = icmp_type as u16;
             key.dst_port = icmp_code as u16;
         }
         _ => {
-            return Err(Error::UnsupportedProtocol);
+            return Err(EbpfError::UnsupportedProtocol);
         }
     }
 
@@ -956,15 +936,15 @@ fn capture_direction_metadata(
     eth_type: EtherType,
     l4_offset: usize,
     is_forward: bool,
-) -> Result<(), Error> {
+) -> Result<(), EbpfError> {
     match eth_type {
         EtherType::Ipv4 => {
             let dscp_ecn: ipv4::DscpEcn = ctx
                 .load(eth::ETH_LEN + ipv4::IPV4_DSCP_ECN_OFFSET)
-                .map_err(|_| Error::OutOfBounds)?;
+                .map_err(|_| EbpfError::OutOfBounds)?;
             let ttl: ipv4::Ttl = ctx
                 .load(eth::ETH_LEN + ipv4::IPV4_TTL_OFFSET)
-                .map_err(|_| Error::OutOfBounds)?;
+                .map_err(|_| EbpfError::OutOfBounds)?;
 
             if is_forward {
                 stats.ip_dscp = ipv4::dscp(dscp_ecn);
@@ -977,10 +957,10 @@ fn capture_direction_metadata(
             }
         }
         EtherType::Ipv6 => {
-            let vtcfl: ipv6::Vcf = ctx.load(eth::ETH_LEN).map_err(|_| Error::OutOfBounds)?;
+            let vtcfl: ipv6::Vcf = ctx.load(eth::ETH_LEN).map_err(|_| EbpfError::OutOfBounds)?;
             let hop_limit: ipv6::HopLimit = ctx
                 .load(eth::ETH_LEN + ipv6::IPV6_HOP_LIMIT_OFFSET)
-                .map_err(|_| Error::OutOfBounds)?;
+                .map_err(|_| EbpfError::OutOfBounds)?;
 
             if is_forward {
                 stats.ip_dscp = ipv6::dscp(vtcfl);
@@ -1000,10 +980,10 @@ fn capture_direction_metadata(
     if stats.protocol == IpProto::Icmp || stats.protocol == IpProto::Ipv6Icmp {
         let icmp_type: u8 = ctx
             .load(l4_offset + icmp::ICMP_TYPE_OFFSET)
-            .map_err(|_| Error::OutOfBounds)?;
+            .map_err(|_| EbpfError::OutOfBounds)?;
         let icmp_code: u8 = ctx
             .load(l4_offset + icmp::ICMP_CODE_OFFSET)
-            .map_err(|_| Error::OutOfBounds)?;
+            .map_err(|_| EbpfError::OutOfBounds)?;
 
         if is_forward {
             stats.icmp_type = icmp_type;
@@ -1024,17 +1004,17 @@ fn capture_direction_metadata(
 ///
 /// # Errors
 ///
-/// Returns [`Error::OutOfBounds`] if packet data cannot be read, or
-/// [`Error::UnsupportedProtocol`] for unsupported L4 protocols.
+/// Returns [`EbpfError::OutOfBounds`] if packet data cannot be read, or
+/// [`EbpfError::UnsupportedProtocol`] for unsupported L4 protocols.
 #[inline(always)]
 fn parse_metadata(
     ctx: &TcContext,
     stats: &mut FlowStats,
     l4_offset: usize,
-) -> Result<usize, Error> {
+) -> Result<usize, EbpfError> {
     stats.src_mac = ctx
         .load::<eth::SrcMacAddr>(eth::ETH_SRC_MAC_ADDR_OFFSET)
-        .map_err(|_| Error::OutOfBounds)?;
+        .map_err(|_| EbpfError::OutOfBounds)?;
 
     // Calculate final offset (start of unparsed payload data)
     let payload_offset = match stats.protocol {
@@ -1043,13 +1023,13 @@ fn parse_metadata(
             // No need to capture here - accumulation handles both first and subsequent packets
             let data_offset: tcp::OffRes = ctx
                 .load(l4_offset + tcp::TCP_OFF_RES_OFFSET)
-                .map_err(|_| Error::OutOfBounds)?;
+                .map_err(|_| EbpfError::OutOfBounds)?;
             let tcp_hdr_len = tcp::hdr_len(data_offset);
             l4_offset + tcp_hdr_len
         }
         IpProto::Udp => l4_offset + udp::UDP_LEN,
         IpProto::Icmp | IpProto::Ipv6Icmp => l4_offset + icmp::ICMP_LEN,
-        _ => return Err(Error::UnsupportedProtocol),
+        _ => return Err(EbpfError::UnsupportedProtocol),
     };
 
     Ok(payload_offset)
@@ -1341,7 +1321,7 @@ mod host_test_shim {
     use alloc::vec::Vec;
     use core::mem;
 
-    use crate::Error;
+    use mermin_common::EbpfError;
 
     #[repr(C)]
     pub struct MockSkBuff {
@@ -1371,9 +1351,9 @@ mod host_test_shim {
             self._data.len() as u32
         }
 
-        pub fn load<T: Copy>(&self, offset: usize) -> Result<T, Error> {
+        pub fn load<T: Copy>(&self, offset: usize) -> Result<T, EbpfError> {
             if offset + mem::size_of::<T>() > self._data.len() {
-                return Err(Error::OutOfBounds);
+                return Err(EbpfError::OutOfBounds);
             }
             let mut value = core::mem::MaybeUninit::<T>::uninit();
             unsafe {
@@ -1402,7 +1382,7 @@ mod host_test_shim {
             self.skb.len()
         }
 
-        pub fn load<T: Copy>(&self, offset: usize) -> Result<T, Error> {
+        pub fn load<T: Copy>(&self, offset: usize) -> Result<T, EbpfError> {
             self.skb.load(offset)
         }
     }
@@ -1686,7 +1666,7 @@ mod tests {
         let result = parse_flow_key(&ctx, &mut flow_key);
 
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), Error::MalformedHeader);
+        assert_eq!(result.unwrap_err(), EbpfError::MalformedHeader);
     }
 
     #[test]
@@ -1701,7 +1681,7 @@ mod tests {
         let result = parse_flow_key(&ctx, &mut flow_key);
 
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), Error::OutOfBounds);
+        assert_eq!(result.unwrap_err(), EbpfError::OutOfBounds);
     }
 
     #[test]
@@ -1717,7 +1697,7 @@ mod tests {
         let result = parse_flow_key(&ctx, &mut flow_key);
 
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), Error::MalformedHeader);
+        assert_eq!(result.unwrap_err(), EbpfError::MalformedHeader);
     }
 
     #[test]
@@ -1731,7 +1711,7 @@ mod tests {
         let result = parse_flow_key(&ctx, &mut flow_key);
 
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), Error::UnsupportedEtherType);
+        assert_eq!(result.unwrap_err(), EbpfError::UnsupportedEtherType);
     }
 
     #[test]
@@ -1972,7 +1952,7 @@ mod tests {
         let result = parse_flow_key(&ctx, &mut flow_key);
 
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), Error::UnsupportedProtocol);
+        assert_eq!(result.unwrap_err(), EbpfError::UnsupportedProtocol);
     }
 
     #[test]

@@ -96,57 +96,59 @@ impl TryFrom<u8> for LogLevel {
     }
 }
 
-/// Error codes for eBPF log entries.
-///
-/// # Synchronization Requirement
-///
-/// These discriminants **MUST** match the `Error` enum in `mermin-ebpf/src/main.rs`.
-/// If you add, remove, or reorder variants here, update the eBPF `Error` enum accordingly.
-/// The `test_log_error_code_discriminants` test verifies the discriminant values.
+/// Error codes used by eBPF packet parsing and carried in log entries to userspace.
 #[repr(u8)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
-pub enum LogErrorCode {
-    /// Out of bounds memory access
+pub enum EbpfError {
+    /// Catch-all internal error
     #[default]
-    OutOfBounds = 0,
+    InternalError = 0,
     /// Malformed packet header
     MalformedHeader = 1,
-    /// Internal error
-    InternalError = 2,
+    /// Out of bounds memory access (packet data read beyond available length)
+    OutOfBounds = 2,
     /// Unsupported EtherType
     UnsupportedEtherType = 3,
     /// Unsupported protocol
     UnsupportedProtocol = 4,
     /// Flow event dropped (ring buffer full)
     FlowEventDropped = 5,
+    /// Per-CPU scratch array slot was unavailable (index out of range or map uninitialized)
+    ScratchUnavailable = 6,
+    /// Flow stats map insert failed (map full or kernel rejected insert)
+    MapInsertFailed = 7,
 }
 
-impl LogErrorCode {
+impl EbpfError {
     /// Convert the error code to a string representation
     #[must_use]
     pub const fn as_str(&self) -> &'static str {
         match self {
-            Self::OutOfBounds => "out of bounds",
-            Self::MalformedHeader => "malformed header",
             Self::InternalError => "internal error",
+            Self::MalformedHeader => "malformed header",
+            Self::OutOfBounds => "out of bounds",
             Self::UnsupportedEtherType => "unsupported ether type",
             Self::UnsupportedProtocol => "unsupported protocol",
             Self::FlowEventDropped => "flow event dropped (ring buffer full)",
+            Self::ScratchUnavailable => "per-cpu scratch unavailable",
+            Self::MapInsertFailed => "flow map insert failed",
         }
     }
 }
 
-impl TryFrom<u8> for LogErrorCode {
+impl TryFrom<u8> for EbpfError {
     type Error = ();
 
     fn try_from(value: u8) -> Result<Self, ()> {
         match value {
-            0 => Ok(Self::OutOfBounds),
+            0 => Ok(Self::InternalError),
             1 => Ok(Self::MalformedHeader),
-            2 => Ok(Self::InternalError),
+            2 => Ok(Self::OutOfBounds),
             3 => Ok(Self::UnsupportedEtherType),
             4 => Ok(Self::UnsupportedProtocol),
             5 => Ok(Self::FlowEventDropped),
+            6 => Ok(Self::ScratchUnavailable),
+            7 => Ok(Self::MapInsertFailed),
             _ => Err(()),
         }
     }
@@ -1531,54 +1533,47 @@ mod tests {
 
     #[test]
     fn test_log_error_code_discriminants() {
-        // These discriminants MUST match the Error enum in mermin-ebpf/src/main.rs
-        assert_eq!(LogErrorCode::OutOfBounds as u8, 0);
-        assert_eq!(LogErrorCode::MalformedHeader as u8, 1);
-        assert_eq!(LogErrorCode::InternalError as u8, 2);
-        assert_eq!(LogErrorCode::UnsupportedEtherType as u8, 3);
-        assert_eq!(LogErrorCode::UnsupportedProtocol as u8, 4);
-        assert_eq!(LogErrorCode::FlowEventDropped as u8, 5);
+        // Discriminants are part of the ABI with userspace log entry decoding; guard against accidental reordering.
+        assert_eq!(EbpfError::InternalError as u8, 0);
+        assert_eq!(EbpfError::MalformedHeader as u8, 1);
+        assert_eq!(EbpfError::OutOfBounds as u8, 2);
+        assert_eq!(EbpfError::UnsupportedEtherType as u8, 3);
+        assert_eq!(EbpfError::UnsupportedProtocol as u8, 4);
+        assert_eq!(EbpfError::FlowEventDropped as u8, 5);
+        assert_eq!(EbpfError::ScratchUnavailable as u8, 6);
+        assert_eq!(EbpfError::MapInsertFailed as u8, 7);
     }
 
     #[test]
     fn test_log_error_code_as_str() {
-        assert_eq!(LogErrorCode::OutOfBounds.as_str(), "out of bounds");
-        assert_eq!(LogErrorCode::MalformedHeader.as_str(), "malformed header");
-        assert_eq!(LogErrorCode::InternalError.as_str(), "internal error");
+        assert_eq!(EbpfError::OutOfBounds.as_str(), "out of bounds");
+        assert_eq!(EbpfError::MalformedHeader.as_str(), "malformed header");
+        assert_eq!(EbpfError::InternalError.as_str(), "internal error");
         assert_eq!(
-            LogErrorCode::UnsupportedEtherType.as_str(),
+            EbpfError::UnsupportedEtherType.as_str(),
             "unsupported ether type"
         );
         assert_eq!(
-            LogErrorCode::UnsupportedProtocol.as_str(),
+            EbpfError::UnsupportedProtocol.as_str(),
             "unsupported protocol"
         );
         assert_eq!(
-            LogErrorCode::FlowEventDropped.as_str(),
+            EbpfError::FlowEventDropped.as_str(),
             "flow event dropped (ring buffer full)"
         );
     }
 
     #[test]
     fn test_log_error_code_try_from() {
-        assert_eq!(LogErrorCode::try_from(0), Ok(LogErrorCode::OutOfBounds));
-        assert_eq!(LogErrorCode::try_from(1), Ok(LogErrorCode::MalformedHeader));
-        assert_eq!(LogErrorCode::try_from(2), Ok(LogErrorCode::InternalError));
-        assert_eq!(
-            LogErrorCode::try_from(3),
-            Ok(LogErrorCode::UnsupportedEtherType)
-        );
-        assert_eq!(
-            LogErrorCode::try_from(4),
-            Ok(LogErrorCode::UnsupportedProtocol)
-        );
-        assert_eq!(
-            LogErrorCode::try_from(5),
-            Ok(LogErrorCode::FlowEventDropped)
-        );
+        assert_eq!(EbpfError::try_from(0), Ok(EbpfError::OutOfBounds));
+        assert_eq!(EbpfError::try_from(1), Ok(EbpfError::MalformedHeader));
+        assert_eq!(EbpfError::try_from(2), Ok(EbpfError::InternalError));
+        assert_eq!(EbpfError::try_from(3), Ok(EbpfError::UnsupportedEtherType));
+        assert_eq!(EbpfError::try_from(4), Ok(EbpfError::UnsupportedProtocol));
+        assert_eq!(EbpfError::try_from(5), Ok(EbpfError::FlowEventDropped));
         // Unknown error codes should return Err
-        assert_eq!(LogErrorCode::try_from(6), Err(()));
-        assert_eq!(LogErrorCode::try_from(255), Err(()));
+        assert_eq!(EbpfError::try_from(6), Err(()));
+        assert_eq!(EbpfError::try_from(255), Err(()));
     }
 
     #[test]

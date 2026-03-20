@@ -6,7 +6,7 @@
 use std::os::fd::AsRawFd;
 
 use aya::maps::RingBuf;
-use mermin_common::{LogEntry, LogErrorCode, LogLevel};
+use mermin_common::{EbpfError, LogEntry, LogLevel};
 use tokio::{
     io::unix::AsyncFd,
     sync::{broadcast, oneshot},
@@ -76,7 +76,7 @@ pub async fn run_log_consumer(
 }
 
 fn emit_log_entry(entry: &LogEntry) {
-    let error_str = LogErrorCode::try_from(entry.error_code)
+    let error_str = EbpfError::try_from(entry.error_code)
         .map(|e| e.as_str())
         .unwrap_or("unknown");
 
