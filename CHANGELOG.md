@@ -1,3 +1,22 @@
+## [v0.3.4] - 2026-03-20
+
+### Bug Fixes
+
+- Correctly assign resource annotations (#524)
+- Optimize flow processing hot paths to reduce lock contention and allocation overhead (#523)
+- Wrap spanattributes in arc to eliminate deep clones on record (#526)
+- Eliminate string heap allocations in flow creation and recording (#527)
+- Reduce per-export heap allocations in otlp span recording (#528)
+- Reduce cpu usage across ebpf, filter, k8s, and flow store hot paths (#529)
+- Consolidate ebpf error type and add specific map failure codes (#533)
+### Performance
+
+- **span:** Cache metric handles to eliminate per-event with_label_values overhead (#520)
+
+[v0.3.3..v0.3.4](https://github.com/elastiflow/mermin/compare/v0.3.3...v0.3.4)
+
+
+
 ## [v0.3.3] - 2026-03-12
 
 ### Bug Fixes
