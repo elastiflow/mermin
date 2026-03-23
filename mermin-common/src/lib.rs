@@ -1565,14 +1565,14 @@ mod tests {
 
     #[test]
     fn test_log_error_code_try_from() {
-        assert_eq!(EbpfError::try_from(0), Ok(EbpfError::OutOfBounds));
+        assert_eq!(EbpfError::try_from(0), Ok(EbpfError::InternalError));
         assert_eq!(EbpfError::try_from(1), Ok(EbpfError::MalformedHeader));
-        assert_eq!(EbpfError::try_from(2), Ok(EbpfError::InternalError));
+        assert_eq!(EbpfError::try_from(2), Ok(EbpfError::OutOfBounds));
         assert_eq!(EbpfError::try_from(3), Ok(EbpfError::UnsupportedEtherType));
         assert_eq!(EbpfError::try_from(4), Ok(EbpfError::UnsupportedProtocol));
         assert_eq!(EbpfError::try_from(5), Ok(EbpfError::FlowEventDropped));
         // Unknown error codes should return Err
-        assert_eq!(EbpfError::try_from(6), Err(()));
+        assert_eq!(EbpfError::try_from(6), Ok(EbpfError::ScratchUnavailable));
         assert_eq!(EbpfError::try_from(255), Err(()));
     }
 
