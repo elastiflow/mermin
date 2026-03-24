@@ -17,7 +17,6 @@ use std::{
 use arc_swap::ArcSwap;
 use futures::{StreamExt, TryStreamExt};
 use ip_network::IpNetwork;
-use jsonpath_rust::JsonPath;
 use k8s_openapi::{
     api::{
         apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet},
@@ -50,7 +49,8 @@ use tracing::{debug, error, trace, warn};
 use crate::{
     health::handlers::HealthState,
     k8s::{
-        K8sError,
+        K8sError, extractor,
+        extractor::{K8sAccessor, K8sMetadataExt},
         owner_relations::{OwnerRelationsManager, OwnerRelationsRules},
         selector::ResourceFilter,
         selector_relations::{SelectorRelationRule, SelectorRelationsManager},
@@ -116,6 +116,8 @@ pub struct AssociationSource {
     pub from: String,
     /// A list of Kubernetes object fields to match against.
     pub to: Vec<String>,
+    #[serde(skip)]
+    pub accessors: Vec<K8sAccessor>,
 }
 
 /// Creates the default Kubernetes attribution configuration.
@@ -160,6 +162,7 @@ fn create_k8s_attributes_mapping(direction: &str) -> AttributesOptions {
                             "status.hostIP".to_string(),
                             "status.hostIPs[*]".to_string(),
                         ],
+                        accessors: vec![],
                     },
                     AssociationSource {
                         from: port_attr_name.clone(),
@@ -167,10 +170,12 @@ fn create_k8s_attributes_mapping(direction: &str) -> AttributesOptions {
                             "spec.containers[*].ports[*].containerPort".to_string(),
                             "spec.containers[*].ports[*].hostPort".to_string(),
                         ],
+                        accessors: vec![],
                     },
                     AssociationSource {
                         from: "network.transport".to_string(),
                         to: vec!["spec.containers[*].ports[*].protocol".to_string()],
+                        accessors: vec![],
                     },
                 ],
             }),
@@ -184,14 +189,17 @@ fn create_k8s_attributes_mapping(direction: &str) -> AttributesOptions {
                             "spec.externalIPs[*]".to_string(),
                             "spec.loadBalancerIP".to_string(),
                         ],
+                        accessors: vec![],
                     },
                     AssociationSource {
                         from: port_attr_name.clone(),
                         to: vec!["spec.ports[*].port".to_string()],
+                        accessors: vec![],
                     },
                     AssociationSource {
                         from: "network.transport".to_string(),
                         to: vec!["spec.ports[*].protocol".to_string()],
+                        accessors: vec![],
                     },
                 ],
             }),
@@ -199,12 +207,14 @@ fn create_k8s_attributes_mapping(direction: &str) -> AttributesOptions {
                 sources: vec![AssociationSource {
                     from: ip_attr_name.clone(),
                     to: vec!["status.addresses[*].address".to_string()],
+                    accessors: vec![],
                 }],
             }),
             endpoint: Some(ObjectAssociationRule {
                 sources: vec![AssociationSource {
                     from: ip_attr_name,
                     to: vec!["endpoints[*].addresses[*]".to_string()],
+                    accessors: vec![],
                 }],
             }),
             ..Default::default()
@@ -1259,33 +1269,6 @@ impl Attributor {
     }
 }
 
-/// Extracts string values from a Kubernetes resource using a JSONPath-like expression.
-///
-/// This function serializes the resource to a serde_json::Value and then applies
-/// the path expression to find and return all matching string values.
-fn extract_values_from_resource<K: serde::Serialize>(
-    resource: &K,
-    path: &str,
-) -> Result<Vec<String>, K8sError> {
-    let full_path = format!("$.{path}");
-
-    let json_value = serde_json::to_value(resource)
-        .map_err(|e| K8sError::Attribution(format!("failed to serialize resource to json: {e}")))?;
-
-    let found_values: Vec<&Value> = json_value.query(&full_path).map_err(|e| {
-        K8sError::Attribution(format!(
-            "invalid jsonpath expression '{full_path}' during value extraction: {e}"
-        ))
-    })?;
-
-    let results = found_values
-        .iter()
-        .filter_map(|v| v.as_str().map(String::from))
-        .collect();
-
-    Ok(results)
-}
-
 async fn index_hostname(
     new_index: &mut HashMap<IpAddr, Vec<K8sObjectMeta>>,
     hostname: &str,
@@ -1323,7 +1306,7 @@ async fn index_resource_by_ip<K>(
     new_index: &mut HashMap<IpAddr, Vec<K8sObjectMeta>>,
     association_rule: &ObjectAssociationRule,
 ) where
-    K: Resource<DynamicType = ()> + Clone + serde::Serialize + 'static,
+    K: Resource<DynamicType = ()> + Clone + serde::Serialize + K8sMetadataExt + 'static,
     ResourceStore: HasStore<K>,
 {
     let ip_sources = association_rule
@@ -1344,33 +1327,29 @@ async fn index_resource_by_ip<K>(
                 false
             };
             let meta = K8sObjectMeta::from(resource.as_ref());
+            let mut json_cache: Option<Value> = None;
 
-            for path in &source.to {
+            for accessor in &source.accessors {
                 // Skip node IP paths for regular (non-host-network) pods
-                if is_pod
-                    && !is_host_network
-                    && (path.contains("hostIP") || path.contains("hostIPs"))
-                {
-                    continue;
-                }
-
-                match extract_values_from_resource(resource.as_ref(), path) {
-                    Ok(values) => {
-                        for value in values {
-                            if path.contains("hostname") || path.contains("externalName") {
-                                index_hostname(new_index, &value, &meta).await;
-                            } else if let Ok(ip) = value.parse::<IpAddr>() {
-                                add_to_index(new_index, ip, &meta);
+                if is_pod && !is_host_network {
+                    match accessor {
+                        K8sAccessor::HostIp | K8sAccessor::HostIps => continue,
+                        K8sAccessor::JsonPath(jp) => {
+                            let path = jp.to_string();
+                            if path.contains("hostIP") || path.contains("hostIPs") {
+                                continue;
                             }
                         }
+                        _ => {}
                     }
-                    Err(e) => {
-                        debug!(
-                            event.name = "k8s.decorator.value_extraction_failed",
-                            k8s.jsonpath.expression = %path,
-                            error.message = %e,
-                            "failed to extract values for configured jsonpath"
-                        );
+                }
+
+                let values = resource.as_ref().extract(accessor, &mut json_cache);
+                for value in values {
+                    if extractor::is_hostname_accessor(accessor) {
+                        index_hostname(new_index, &value, &meta).await;
+                    } else if let Ok(ip) = value.parse::<IpAddr>() {
+                        add_to_index(new_index, ip, &meta);
                     }
                 }
             }
@@ -2320,6 +2299,7 @@ mod tests {
                             sources: vec![AssociationSource {
                                 from: "source.ip".to_string(),
                                 to: vec!["status.podIP".to_string()],
+                                accessors: vec![],
                             }],
                         }),
                         ..Default::default()
@@ -2329,6 +2309,7 @@ mod tests {
             );
             hcl_config.insert("source".to_string(), k8s_inner);
             conf.attributes = Some(hcl_config);
+            conf.compile_attributes();
 
             let pod = Pod {
                 metadata: ObjectMeta {

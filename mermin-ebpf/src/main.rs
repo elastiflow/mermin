@@ -102,7 +102,7 @@ use mermin_common::FlowEvent;
 #[cfg(not(feature = "test"))]
 use mermin_common::LogEntry;
 use mermin_common::{
-    ConnectionState, Direction, FlowKey, FlowStats, IpVersion, EbpfError, eth,
+    ConnectionState, Direction, EbpfError, FlowKey, FlowStats, IpVersion, eth,
     eth::EtherType,
     icmp,
     ip::{IpProto, ipv4, ipv6},
@@ -605,7 +605,11 @@ fn update_tcp_timing(
 fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, EbpfError> {
     // Use per-CPU scratch space for FlowKey parsing (avoids stack overflow)
     #[allow(static_mut_refs)]
-    let flow_key_ptr = unsafe { FLOW_KEY_SCRATCH.get_ptr_mut(0).ok_or(EbpfError::ScratchUnavailable)? };
+    let flow_key_ptr = unsafe {
+        FLOW_KEY_SCRATCH
+            .get_ptr_mut(0)
+            .ok_or(EbpfError::ScratchUnavailable)?
+    };
     let flow_key = unsafe { &mut *flow_key_ptr };
     let (eth_type, l4_offset) = parse_flow_key(ctx, flow_key)?;
 

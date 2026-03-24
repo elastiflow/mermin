@@ -210,6 +210,7 @@ impl Conf {
                 Some(user_map)
             }
         };
+        conf.compile_attributes();
         conf.config_path = config_path_to_store;
 
         conf.discovery
@@ -257,8 +258,16 @@ impl Conf {
         conf.attributes = match conf.attributes {
             None => Some(default_attributes()),
             Some(map) if map.is_empty() => None,
-            Some(map) => Some(map),
+            Some(mut user_map) => {
+                let defaults = default_attributes();
+
+                for (direction, default_inner_map) in defaults {
+                    user_map.entry(direction).or_insert(default_inner_map);
+                }
+                Some(user_map)
+            }
         };
+        conf.compile_attributes();
         conf.config_path = self.config_path.clone();
 
         conf.discovery
@@ -281,6 +290,37 @@ impl Conf {
             .and_then(|providers_map| providers_map.get("k8s"))
             .map(|options| options.extract.metadata.clone())
             .unwrap_or_default()
+    }
+
+    pub fn compile_attributes(&mut self) {
+        if let Some(ref mut directions_map) = self.attributes {
+            for inner_map in directions_map.values_mut() {
+                if let Some(options) = inner_map.get_mut("k8s") {
+                    let association = &mut options.association;
+                    let compile_rule =
+                        |rule: &mut Option<crate::k8s::attributor::ObjectAssociationRule>| {
+                            if let Some(rule) = rule {
+                                for source in &mut rule.sources {
+                                    source.accessors = source
+                                        .to
+                                        .iter()
+                                        .map(|path| crate::k8s::extractor::K8sAccessor::parse(path))
+                                        .collect();
+                                }
+                            }
+                        };
+
+                    compile_rule(&mut association.pod);
+                    compile_rule(&mut association.node);
+                    compile_rule(&mut association.service);
+                    compile_rule(&mut association.networkpolicy);
+                    compile_rule(&mut association.endpoint);
+                    compile_rule(&mut association.endpointslice);
+                    compile_rule(&mut association.ingress);
+                    compile_rule(&mut association.gateway);
+                }
+            }
+        }
     }
 
     /// Merges a configuration file into a Figment instance, automatically

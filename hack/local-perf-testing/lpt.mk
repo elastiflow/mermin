@@ -40,7 +40,7 @@ lpt-build:
 lpt-build-restart: lpt-build
 	$(call log_info,Restarting Mermin daemonset to pick up new image)
 	@kubectl rollout restart daemonset/mermin -n default
-	@kubectl rollout status --watch --timeout 120 daemonset/mermin -n default
+	@kubectl rollout status --watch --timeout 120s daemonset/mermin -n default
 
 #########################################
 # Mermin deployment
