@@ -57,14 +57,14 @@ A full configuration example can be found in the [Default Configuration](../defa
 
 - `selectors` attribute
 
-  Include/Exclude resources from the Kubernetes Informer using the resource labels and [label selectors](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/).
+  Filter which Kubernetes resources are used during IP-to-resource attribution and metadata enrichment. Selectors control which cached objects are considered when resolving flow IPs to Pods, Services, and other resources, affecting which Kubernetes metadata appears on exported flow spans.
 
   **Type:** List of [selectors](#selector)
 
   **Default:**
 
   ```hcl
-  [
+  selectors = [
     { kind = "Service" }, { kind = "Endpoint" }, { kind = "EndpointSlice" }, { kind = "Gateway" }, { kind = "Ingress" },
     { kind = "Pod" }, { kind = "ReplicaSet" }, { kind = "Deployment" }, { kind = "Daemonset" }, { kind = "StatefulSet" },
     { kind = "Job" }, { kind = "CronJob" }, { kind = "NetworkPolicy" },
