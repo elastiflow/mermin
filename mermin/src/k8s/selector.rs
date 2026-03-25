@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+use k8s_openapi::api::core::v1::Pod;
 use kube::{Resource, ResourceExt};
 use serde::{Deserialize, Serialize};
 
@@ -218,6 +219,29 @@ impl ResourceFilter {
         }
 
         false
+    }
+
+    /// Checks if a flow span should be exported based on resolved source/destination pods.
+    ///
+    /// Export policy:
+    /// - If either endpoint resolves to a Pod and that Pod is excluded by selectors → DENY export
+    /// - If a Pod cannot be resolved (None) → ALLOW export (safe default)
+    /// - If both endpoints are allowed or unresolved → ALLOW export
+    ///
+    pub fn should_export_flow(&self, src_pod: Option<&Pod>, dst_pod: Option<&Pod>) -> bool {
+        if let Some(pod) = src_pod
+            && !self.is_allowed(pod)
+        {
+            return false;
+        }
+
+        if let Some(pod) = dst_pod
+            && !self.is_allowed(pod)
+        {
+            return false;
+        }
+
+        true
     }
 }
 
@@ -735,6 +759,171 @@ mod tests {
         assert!(
             filter.is_allowed(&other_pod),
             "Non-excluded pod should be allowed"
+        );
+    }
+
+    #[test]
+    fn test_should_export_flow_both_allowed() {
+        let filter = ResourceFilter::new(vec![Selectors::new("Pod")]);
+
+        let allowed_pod = create_test_pod(
+            "allowed-pod",
+            "default",
+            BTreeMap::from([("app".to_string(), "myapp".to_string())]),
+        );
+
+        assert!(
+            filter.should_export_flow(Some(&allowed_pod), Some(&allowed_pod)),
+            "Flow between allowed pods should be exported"
+        );
+    }
+
+    #[test]
+    fn test_should_export_flow_src_excluded() {
+        let mut exclude_rule = Selectors::new("Pod");
+        exclude_rule.include = false;
+        exclude_rule.match_labels = Some(HashMap::from([(
+            "app".to_string(),
+            "netobserv".to_string(),
+        )]));
+
+        let filter = ResourceFilter::new(vec![exclude_rule]);
+
+        let excluded_pod = create_test_pod(
+            "netobserv-pod",
+            "default",
+            BTreeMap::from([("app".to_string(), "netobserv".to_string())]),
+        );
+
+        let allowed_pod = create_test_pod(
+            "myapp-pod",
+            "default",
+            BTreeMap::from([("app".to_string(), "myapp".to_string())]),
+        );
+
+        assert!(
+            !filter.should_export_flow(Some(&excluded_pod), Some(&allowed_pod)),
+            "Flow with excluded source pod should not be exported"
+        );
+    }
+
+    #[test]
+    fn test_should_export_flow_dst_excluded() {
+        let mut exclude_rule = Selectors::new("Pod");
+        exclude_rule.include = false;
+        exclude_rule.match_labels = Some(HashMap::from([(
+            "app".to_string(),
+            "opensearch".to_string(),
+        )]));
+
+        let filter = ResourceFilter::new(vec![exclude_rule]);
+
+        let excluded_pod = create_test_pod(
+            "opensearch-pod",
+            "default",
+            BTreeMap::from([("app".to_string(), "opensearch".to_string())]),
+        );
+
+        let allowed_pod = create_test_pod(
+            "myapp-pod",
+            "default",
+            BTreeMap::from([("app".to_string(), "myapp".to_string())]),
+        );
+
+        assert!(
+            !filter.should_export_flow(Some(&allowed_pod), Some(&excluded_pod)),
+            "Flow with excluded destination pod should not be exported"
+        );
+    }
+
+    #[test]
+    fn test_should_export_flow_both_excluded() {
+        let mut exclude_rule = Selectors::new("Pod");
+        exclude_rule.include = false;
+        exclude_rule.match_labels =
+            Some(HashMap::from([("app".to_string(), "system".to_string())]));
+
+        let filter = ResourceFilter::new(vec![exclude_rule]);
+
+        let excluded_pod = create_test_pod(
+            "system-pod",
+            "default",
+            BTreeMap::from([("app".to_string(), "system".to_string())]),
+        );
+
+        assert!(
+            !filter.should_export_flow(Some(&excluded_pod), Some(&excluded_pod)),
+            "Flow between excluded pods should not be exported"
+        );
+    }
+
+    #[test]
+    fn test_should_export_flow_unresolved_src() {
+        let filter = ResourceFilter::new(vec![Selectors::new("Pod")]);
+
+        let allowed_pod = create_test_pod(
+            "allowed-pod",
+            "default",
+            BTreeMap::from([("app".to_string(), "myapp".to_string())]),
+        );
+
+        assert!(
+            filter.should_export_flow(None, Some(&allowed_pod)),
+            "Flow with unresolved source should be exported (safe default)"
+        );
+    }
+
+    #[test]
+    fn test_should_export_flow_unresolved_dst() {
+        let filter = ResourceFilter::new(vec![Selectors::new("Pod")]);
+
+        let allowed_pod = create_test_pod(
+            "allowed-pod",
+            "default",
+            BTreeMap::from([("app".to_string(), "myapp".to_string())]),
+        );
+
+        assert!(
+            filter.should_export_flow(Some(&allowed_pod), None),
+            "Flow with unresolved destination should be exported (safe default)"
+        );
+    }
+
+    #[test]
+    fn test_should_export_flow_both_unresolved() {
+        let filter = ResourceFilter::new(vec![Selectors::new("Pod")]);
+
+        assert!(
+            filter.should_export_flow(None, None),
+            "Flow with both endpoints unresolved should be exported (safe default)"
+        );
+    }
+
+    #[test]
+    fn test_should_export_flow_excluded_with_unresolved() {
+        let mut exclude_rule = Selectors::new("Pod");
+        exclude_rule.include = false;
+        exclude_rule.match_labels = Some(HashMap::from([(
+            "app".to_string(),
+            "netobserv".to_string(),
+        )]));
+
+        let filter = ResourceFilter::new(vec![exclude_rule]);
+
+        let excluded_pod = create_test_pod(
+            "netobserv-pod",
+            "default",
+            BTreeMap::from([("app".to_string(), "netobserv".to_string())]),
+        );
+
+        assert!(
+            !filter.should_export_flow(Some(&excluded_pod), None),
+            "Flow with excluded source and unresolved destination should not be exported"
+        );
+
+        assert!(
+            !filter.should_export_flow(None, Some(&excluded_pod)),
+            "Flow with unresolved source and excluded destination should not be exported"
         );
     }
 }

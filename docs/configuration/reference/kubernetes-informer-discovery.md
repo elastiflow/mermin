@@ -59,6 +59,8 @@ A full configuration example can be found in the [Default Configuration](../defa
 
   Filter which Kubernetes resources are used during IP-to-resource attribution and metadata enrichment. Selectors control which cached objects are considered when resolving flow IPs to Pods, Services, and other resources, affecting which Kubernetes metadata appears on exported flow spans.
 
+  **Export behavior:** When `include = false` is used to exclude Pods, flows whose source or destination resolves to an excluded Pod are **dropped before export** (zero OTLP spans emitted). Flows with unresolved endpoints are exported by default (safe default).
+
   **Type:** List of [selectors](#selector)
 
   **Default:**
@@ -114,6 +116,8 @@ Selector is used to match a Kubernetes resource using labels and expressions.
 - `include` attribute
 
   Defines an action to perform, e.g. include or exclude matching resources.
+
+  When `include = false` is set for Pod selectors, matching pods are excluded from both attribution and export. Flows whose source or destination resolves to an excluded pod will not be exported to OTLP. If a pod cannot be resolved, the flow is exported by default.
 
   **Type:** Boolean
 

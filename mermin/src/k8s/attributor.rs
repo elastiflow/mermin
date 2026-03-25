@@ -856,6 +856,70 @@ impl Attributor {
         self.get_objects_by_ip(ip).await.into_iter().next()
     }
 
+    /// Looks up a Pod by its IP address without applying selector filtering.
+    ///
+    /// This method uses the same IP index and conflict resolution logic as `get_pod_by_ip`,
+    /// but does NOT filter pods based on `ResourceFilter::is_allowed`. This allows the
+    /// export gate to distinguish between "pod resolved but excluded" (should drop) vs
+    /// "pod not resolved" (should export by safe default).
+    pub async fn get_pod_by_ip_unfiltered(&self, ip: IpAddr) -> Option<Arc<Pod>> {
+        self.get_objects_by_ip_unfiltered(ip)
+            .await
+            .into_iter()
+            .next()
+    }
+
+    async fn get_objects_by_ip_unfiltered<K>(&self, ip: IpAddr) -> Vec<Arc<K>>
+    where
+        K: Resource<DynamicType = ()> + Clone + Send + Sync + 'static,
+        ResourceStore: HasStore<K>,
+    {
+        let guard = self.ip_index.load();
+        let Some(candidates) = guard.get(&ip) else {
+            return Vec::new();
+        };
+
+        let mut pods = Vec::new();
+        let mut nodes = Vec::new();
+        let mut services = Vec::new();
+        let mut other_resources = Vec::new();
+
+        for meta in candidates {
+            let name = &meta.name;
+            let ns = meta.namespace.as_deref().unwrap_or_default();
+
+            match meta.kind.as_str() {
+                "Pod" => {
+                    let key: ObjectRef<Pod> = ObjectRef::new(name).within(ns);
+                    if let Some(p) = self.resource_store.pods.get(&key) {
+                        pods.push(p);
+                    }
+                }
+                "Node" => {
+                    let key: ObjectRef<Node> = ObjectRef::new(name);
+                    if let Some(n) = self.resource_store.nodes.get(&key) {
+                        nodes.push(n);
+                    }
+                }
+                "Service" => {
+                    let key: ObjectRef<Service> = ObjectRef::new(name).within(ns);
+                    if let Some(s) = self.resource_store.services.get(&key) {
+                        services.push(s);
+                    }
+                }
+                kind if kind == K::kind(&()) => {
+                    let key: ObjectRef<K> = ObjectRef::new(name).within(ns);
+                    if let Some(o) = self.resource_store.store().get(&key) {
+                        other_resources.push(o);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        self.resolve_ip_conflicts(ip, &pods, &nodes, &services, &other_resources)
+    }
+
     pub async fn get_node_by_ip(&self, ip: IpAddr) -> Option<Arc<Node>> {
         self.get_objects_by_ip(ip).await.into_iter().next()
     }
