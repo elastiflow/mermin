@@ -61,7 +61,7 @@ jobs:
           docker save not-exists.elastiflow.com/mermin:${{ inputs.image-tag }} -o image-artifact/mermin-${{ inputs.image-tag }}.tar
 
       - name: Upload image artifact
-        uses: actions/upload-artifact@c6a366c94c3e0affe28c06c8df20a878f24da3cf
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         with:
           name: mermin-docker-image-${{ inputs.image-tag }}
           path: image-artifact/
