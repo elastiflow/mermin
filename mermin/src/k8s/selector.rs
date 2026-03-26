@@ -194,7 +194,7 @@ impl ResourceFilter {
         K: Resource,
         K::DynamicType: Default,
     {
-        let kind = K::kind(&Default::default()).to_string().to_lowercase();
+        let kind = K::kind(&Default::default()).to_lowercase();
 
         let Some(kind_rules) = self.rules.get(&kind) else {
             return false;
@@ -206,19 +206,15 @@ impl ResourceFilter {
             }
         }
 
-        let include_rules: Vec<_> = kind_rules.iter().filter(|r| r.include).collect();
-
-        if include_rules.is_empty() {
+        let has_include_rules = kind_rules.iter().any(|r| r.include);
+        if !has_include_rules {
             return true;
         }
 
-        for rule in include_rules {
-            if rule.matches(resource) {
-                return true;
-            }
-        }
-
-        false
+        kind_rules
+            .iter()
+            .filter(|r| r.include)
+            .any(|r| r.matches(resource))
     }
 
     /// Checks if a flow span should be exported based on resolved source/destination pods.
@@ -227,7 +223,6 @@ impl ResourceFilter {
     /// - If either endpoint resolves to a Pod and that Pod is excluded by selectors → DENY export
     /// - If a Pod cannot be resolved (None) → ALLOW export (safe default)
     /// - If both endpoints are allowed or unresolved → ALLOW export
-    ///
     pub fn should_export_flow(&self, src_pod: Option<&Pod>, dst_pod: Option<&Pod>) -> bool {
         if let Some(pod) = src_pod
             && !self.is_allowed(pod)

@@ -41,7 +41,10 @@ use crate::{
         },
         types::ControllerCommand,
     },
-    k8s::{attributor::Attributor, decorator::Decorator},
+    k8s::{
+        attributor::{Attributor, FlowContextDecision},
+        decorator::Decorator,
+    },
     metrics::{
         ebpf::{EbpfMapName, init_ringbuf_metrics},
         evictor::MetricsEvictor,
@@ -1031,30 +1034,27 @@ async fn start_pipeline(
                                 .with_label_values(&[ChannelName::ProducerOutput.as_str()])
                                 .set(channel_size as i64);
 
-                            let src_pod = attributor.get_pod_by_ip_unfiltered(flow_span.attributes.source_address).await;
-                            let dst_pod = attributor.get_pod_by_ip_unfiltered(flow_span.attributes.destination_address).await;
-
-                            if !attributor.filter.should_export_flow(
-                                src_pod.as_deref(),
-                                dst_pod.as_deref(),
-                            ) {
-                                metrics::labels::inc_k8s_decorator_flow_spans(K8sDecoratorStatus::Excluded);
-                                debug!(
-                                    event.name = "k8s.flow.excluded",
-                                    flow.community_id = %flow_span.attributes.flow_community_id,
-                                    src_pod = ?src_pod.as_ref().map(|p| p.metadata.name.as_deref()),
-                                    dst_pod = ?dst_pod.as_ref().map(|p| p.metadata.name.as_deref()),
-                                    "flow excluded by selector rules, not exporting"
-                                );
-                                continue;
-                            }
+                            let flow_ctx = match attributor.check_and_build_context(&flow_span).await {
+                                FlowContextDecision::Excluded { src_pod, dst_pod } => {
+                                    metrics::labels::inc_k8s_decorator_flow_spans(K8sDecoratorStatus::Excluded);
+                                    debug!(
+                                        event.name = "k8s.flow.excluded",
+                                        flow.community_id = %flow_span.attributes.flow_community_id,
+                                        src_pod = ?src_pod.as_ref().map(|p| p.metadata.name.as_deref()),
+                                        dst_pod = ?dst_pod.as_ref().map(|p| p.metadata.name.as_deref()),
+                                        "flow excluded by selector rules, not exporting"
+                                    );
+                                    continue;
+                                }
+                                FlowContextDecision::Allowed(ctx) => ctx,
+                            };
 
                             let _timer = metrics::registry::PROCESSING_DURATION_SECONDS
                                 .get()
                                 .unwrap()
                                 .with_label_values(&[ProcessingStage::K8sDecoratorOut.as_str()])
                                 .start_timer();
-                            let (span, err) = decorator.decorate_or_fallback(flow_span).await;
+                            let (span, err) = decorator.decorate_or_fallback(flow_span, flow_ctx).await;
 
                             match err {
                                 Some(e) => {

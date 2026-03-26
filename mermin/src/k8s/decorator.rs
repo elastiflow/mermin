@@ -91,8 +91,12 @@ impl<'a> Decorator<'a> {
     /// NEVER dropped - if decoration fails for any reason, the span is returned as-is. The
     /// returned span may be partially decorated: if src/dst K8s attribute lookups succeeded
     /// before the failure, those fields will be populated on the fallback span.
-    pub async fn decorate_or_fallback(&self, flow_span: FlowSpan) -> (FlowSpan, Option<K8sError>) {
-        match self.decorate(flow_span).await {
+    pub async fn decorate_or_fallback(
+        &self,
+        flow_span: FlowSpan,
+        ctx: FlowContext,
+    ) -> (FlowSpan, Option<K8sError>) {
+        match self.decorate(flow_span, ctx).await {
             Ok(decorated_span) => (decorated_span, None),
             Err((e, original)) => (original, Some(e)),
         }
@@ -103,9 +107,11 @@ impl<'a> Decorator<'a> {
     /// Takes ownership of `flow_span` so that K8s fields can be written via `attrs_mut()` without
     /// cloning the inner `Arc<SpanAttributes>` (refcount is 1 on entry). On error the span is
     /// returned inside the `Err` variant so the caller can fall back to the undecorated version.
-    async fn decorate(&self, mut flow_span: FlowSpan) -> Result<FlowSpan, (K8sError, FlowSpan)> {
-        let ctx = FlowContext::from_flow_span(&flow_span, self.attributor).await;
-
+    async fn decorate(
+        &self,
+        mut flow_span: FlowSpan,
+        ctx: FlowContext,
+    ) -> Result<FlowSpan, (K8sError, FlowSpan)> {
         // Copy the port scalars (u16, Copy) before any mutable borrow of flow_span.
         let src_port = flow_span.attributes.source_port;
         let dst_port = flow_span.attributes.destination_port;
