@@ -85,7 +85,7 @@ jobs:
           go-version: "1.24"
 
       - name: Download Docker image artifact
-        uses: actions/download-artifact@a9bc5e6ef2cb54c177f32aa5726adaa15e7e2d59
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: mermin-docker-image-${{ inputs.image-tag }}
           path: image-artifact/
