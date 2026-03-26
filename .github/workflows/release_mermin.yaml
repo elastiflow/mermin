@@ -54,7 +54,7 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 0
       - name: Prepare Release
@@ -102,7 +102,7 @@ jobs:
       CHARTS_DIR: charts/mermin
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 0
       - name: Prepare Release
@@ -151,10 +151,10 @@ jobs:
         }
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 0
-      - uses: google-github-actions/auth@v2
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
         id: gcr_auth
         with:
           token_format: "access_token"
@@ -163,7 +163,7 @@ jobs:
           service_account: "gha-registry-writer@pub-artifacts-j8rjbu.iam.gserviceaccount.com"
           access_token_lifetime: 5400s
       - name: Login to GCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2
         with:
           registry: us-docker.pkg.dev
           username: oauth2accesstoken
@@ -205,7 +205,7 @@ jobs:
       CHARTS_DIR: charts/mermin
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 0
       - name: Configure Git
@@ -213,14 +213,14 @@ jobs:
           git config user.name "$GITHUB_ACTOR"
           git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
       - name: Install Helm
-        uses: azure/setup-helm@v4
+        uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2
       - name: Install Helm dependencies
         run: |
           (helm dependency list ${{ env.CHARTS_DIR }} || true) | grep -E 'https://' | while read -r dep; do
             helm repo add $(echo ${dep} | awk '{print $1}') $(echo ${dep} | awk '{print $4}')
           done
       - name: Install chart-releaser
-        uses: helm/chart-releaser-action@v1.7.0
+        uses: helm/chart-releaser-action@cae68fefc6b5f367a0275617c9f83181ba54714f
         env:
           CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
         with:
