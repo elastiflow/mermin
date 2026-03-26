@@ -792,7 +792,7 @@ impl Attributor {
 
         manager.get_related_resources(pod_labels, &pod_namespace, &self.resource_store)
     }
-    
+
     /// Shared IP lookup implementation used by filtered and unfiltered callers.
     ///
     /// Includes conflict-aware behavior needed for Cilium-style environments where
