@@ -640,15 +640,6 @@ pub struct FlowContext {
     pub protocol: IpProto,
 }
 
-#[derive(Debug, Clone)]
-pub enum FlowContextDecision {
-    Excluded {
-        src_pod: Option<Arc<Pod>>,
-        dst_pod: Option<Arc<Pod>>,
-    },
-    Allowed(FlowContext),
-}
-
 /// A high-level client for querying Kubernetes resources.
 pub struct Attributor {
     pub resource_store: ResourceStore,
@@ -659,7 +650,7 @@ pub struct Attributor {
 }
 
 impl Attributor {
-    pub async fn check_and_build_context(&self, flow_span: &FlowSpan) -> FlowContextDecision {
+    pub async fn check_and_build_context(&self, flow_span: &FlowSpan) -> Option<FlowContext> {
         let (src_ip, dst_ip, port, protocol) = (
             flow_span.attributes.source_address,
             flow_span.attributes.destination_address,
@@ -674,13 +665,13 @@ impl Attributor {
             .filter
             .should_export_flow(src_pod.as_deref(), dst_pod.as_deref())
         {
-            return FlowContextDecision::Excluded { src_pod, dst_pod };
+            return None;
         }
 
         let src_pod = src_pod.filter(|pod| self.filter.is_allowed(pod.as_ref()));
         let dst_pod = dst_pod.filter(|pod| self.filter.is_allowed(pod.as_ref()));
 
-        FlowContextDecision::Allowed(FlowContext {
+        Some(FlowContext {
             src_pod,
             src_ip,
             dst_pod,
@@ -795,18 +786,16 @@ impl Attributor {
 
     /// Shared IP lookup implementation used by filtered and unfiltered callers.
     ///
+    /// When `apply_filter` is false, `ResourceFilter::is_allowed` is skipped during
+    /// lookup so callers can distinguish excluded resources from unresolved IPs.
+    ///
     /// Includes conflict-aware behavior needed for Cilium-style environments where
     /// multiple Kubernetes resources may share the same IP (for example, host-network
     /// pods and nodes).
-    ///
-    /// # Arguments
-    /// * `ip` - The IP address to look up
-    /// * `filter` - A predicate function that determines whether a resource should be included
-    async fn get_objects_by_ip_impl<K, F>(&self, ip: IpAddr, filter: F) -> Vec<Arc<K>>
+    async fn get_objects_by_ip_impl<K>(&self, ip: IpAddr, apply_filter: bool) -> Vec<Arc<K>>
     where
         K: Resource<DynamicType = ()> + Clone + Send + Sync + 'static,
         ResourceStore: HasStore<K>,
-        F: Fn(&K) -> bool,
     {
         let guard = self.ip_index.load();
         let Some(candidates) = guard.get(&ip) else {
@@ -830,7 +819,7 @@ impl Attributor {
                         .resource_store
                         .pods
                         .get(&key)
-                        .filter(|p| self.filter.is_allowed(p.as_ref()))
+                        .filter(|p| !apply_filter || self.filter.is_allowed(p.as_ref()))
                     {
                         pods.push(p);
                     }
@@ -841,7 +830,7 @@ impl Attributor {
                         .resource_store
                         .nodes
                         .get(&key)
-                        .filter(|n| self.filter.is_allowed(n.as_ref()))
+                        .filter(|n| !apply_filter || self.filter.is_allowed(n.as_ref()))
                     {
                         nodes.push(n);
                     }
@@ -852,7 +841,7 @@ impl Attributor {
                         .resource_store
                         .services
                         .get(&key)
-                        .filter(|s| self.filter.is_allowed(s.as_ref()))
+                        .filter(|s| !apply_filter || self.filter.is_allowed(s.as_ref()))
                     {
                         services.push(s);
                     }
@@ -863,7 +852,7 @@ impl Attributor {
                         .resource_store
                         .store()
                         .get(&key)
-                        .filter(|o| filter(o.as_ref()))
+                        .filter(|o| !apply_filter || self.filter.is_allowed(o.as_ref()))
                     {
                         other_resources.push(o);
                     }
@@ -881,8 +870,7 @@ impl Attributor {
         K: Resource<DynamicType = ()> + Clone + Send + Sync + 'static,
         ResourceStore: HasStore<K>,
     {
-        self.get_objects_by_ip_impl(ip, |r| self.filter.is_allowed(r))
-            .await
+        self.get_objects_by_ip_impl(ip, true).await
     }
 
     /// Looks up objects of kind `K` for `ip` without applying `ResourceFilter`.
@@ -902,7 +890,7 @@ impl Attributor {
         K: Resource<DynamicType = ()> + Clone + Send + Sync + 'static,
         ResourceStore: HasStore<K>,
     {
-        self.get_objects_by_ip_impl(ip, |_| true).await
+        self.get_objects_by_ip_impl(ip, false).await
     }
 
     pub async fn get_node_by_ip(&self, ip: IpAddr) -> Option<Arc<Node>> {
