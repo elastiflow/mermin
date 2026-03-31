@@ -1031,12 +1031,17 @@ async fn start_pipeline(
                                 .with_label_values(&[ChannelName::ProducerOutput.as_str()])
                                 .set(channel_size as i64);
 
+                            let Some(flow_ctx) = attributor.check_and_build_context(&flow_span).await else {
+                                metrics::labels::inc_k8s_decorator_flow_spans(K8sDecoratorStatus::Excluded);
+                                continue;
+                            };
+
                             let _timer = metrics::registry::PROCESSING_DURATION_SECONDS
                                 .get()
                                 .unwrap()
                                 .with_label_values(&[ProcessingStage::K8sDecoratorOut.as_str()])
                                 .start_timer();
-                            let (span, err) = decorator.decorate_or_fallback(flow_span).await;
+                            let (span, err) = decorator.decorate_or_fallback(flow_span, flow_ctx).await;
 
                             match err {
                                 Some(e) => {

@@ -104,6 +104,7 @@ pub enum K8sDecoratorStatus {
     Ok,
     Error,
     Undecorated,
+    Excluded,
 }
 
 impl K8sDecoratorStatus {
@@ -113,6 +114,7 @@ impl K8sDecoratorStatus {
             K8sDecoratorStatus::Ok => "ok",
             K8sDecoratorStatus::Error => "error",
             K8sDecoratorStatus::Undecorated => "undecorated",
+            K8sDecoratorStatus::Excluded => "excluded",
         }
     }
 }

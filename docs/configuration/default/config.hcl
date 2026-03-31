@@ -120,10 +120,15 @@ discovery "informer" "k8s" {
   informers_sync_timeout = "30s" # Timeout for initial cache sync (increase for large clusters)
 
   /*
-    Define which flow will be processed and sent to the output.
-    Impacts the "In-mem K8s objects cache" build by K8s informer (https://www.plural.sh/blog/manage-kubernetes-events-informers/)
+    Define which Kubernetes resources are used for IP-to-resource attribution and metadata enrichment.
+    Selectors filter which cached objects are considered when resolving flow IPs to Pods, Services, etc.,
+    affecting which Kubernetes metadata appears on exported flow spans.
+
+    Impacts the "In-mem K8s objects cache" built by K8s informer (https://www.plural.sh/blog/manage-kubernetes-events-informers/)
       - By default `namespaces = []`, which means "all namespaces", e.g. no filtering by namespaces.
       - `kind` is case insensitive
+      - `include = true` (default) means "allow matching resources"
+      - `include = false` means "exclude matching resources" (exclude rules take precedence)
   */
   selectors = [
     { kind = "Service" }, { kind = "Endpoint" }, { kind = "EndpointSlice" }, { kind = "Gateway" }, { kind = "Ingress" },

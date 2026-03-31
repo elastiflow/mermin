@@ -523,7 +523,7 @@ lazy_static! {
         Opts::new("flow_spans_total", "Total number of flow spans processed by K8s decorator")
             .namespace("mermin")
             .subsystem("k8s_decorator"),
-        &["status"] // status: "dropped" | "ok" | "error" | "undecorated"
+        &["status"] // status: "dropped" | "ok" | "error" | "undecorated" | "excluded"
     ).expect("failed to create k8s_decorator_flow_spans_total metric");
 
     pub static ref K8S_WATCHER_EVENTS_TOTAL: IntCounterVec = IntCounterVec::new(
