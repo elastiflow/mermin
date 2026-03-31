@@ -33,20 +33,25 @@ pub struct NetworkPolicy {
 /// Expand a list of extract rules into a compiled lookup structure.
 ///
 /// Returns `(specific, wildcards)`:
-/// - `specific`: fully-qualified `"resource.metadata.field"` keys (e.g. `"pod.metadata.name"`)
-///   for rules that name a concrete resource type.
+/// - `specific`: a nested map where the key is the resource kind (e.g., `"pod"`)
+///   and the value is a set of fields to extract (e.g., `"name"`, `"namespace"`).
 /// - `wildcards`: bare field names (e.g. `"name"`) extracted from `[*].metadata.<field>` rules.
 ///   A wildcard entry matches *any* resource kind, preserving the original `[*]` semantics.
 ///
 /// Both lookups are O(1) at runtime with no allocation in `should_extract`.
-fn expand_extract_rules(rules: Vec<String>) -> (HashSet<String>, HashSet<String>) {
-    let mut specific = HashSet::with_capacity(rules.len());
+fn expand_extract_rules(rules: Vec<String>) -> (HashMap<String, HashSet<String>>, HashSet<String>) {
+    let mut specific: HashMap<String, HashSet<String>> = HashMap::with_capacity(rules.len());
     let mut wildcards = HashSet::new();
     for rule in rules {
         if let Some(field) = rule.strip_prefix("[*].metadata.") {
             wildcards.insert(field.to_owned());
-        } else {
-            specific.insert(rule);
+        } else if let Some(meta_idx) = rule.find(".metadata.") {
+            let resource = &rule[..meta_idx];
+            let field = &rule[meta_idx + ".metadata.".len()..];
+            specific
+                .entry(resource.to_owned())
+                .or_default()
+                .insert(field.to_owned());
         }
     }
     (specific, wildcards)
@@ -56,14 +61,17 @@ fn expand_extract_rules(rules: Vec<String>) -> (HashSet<String>, HashSet<String>
 /// to produce enriched flow attributes containing resource information.
 pub struct Decorator<'a> {
     attributor: &'a Attributor,
-    /// Pre-compiled set of `"resource.metadata.field"` keys for source-side extraction.
-    source_extract_set: HashSet<String>,
+    /// Pre-compiled nested map of extraction rules for source-side extraction.
+    /// Keyed by resource kind (e.g., "pod").
+    source_extract_map: HashMap<String, HashSet<String>>,
     /// Field names matched by source-side `[*].metadata.<field>` wildcard rules.
     /// A hit here means the field is extracted regardless of resource kind.
     source_wildcard_fields: HashSet<String>,
-    /// Pre-compiled set of `"resource.metadata.field"` keys for dest-side extraction.
-    dest_extract_set: HashSet<String>,
+    /// Pre-compiled nested map of extraction rules for dest-side extraction.
+    /// Keyed by resource kind (e.g., "pod").
+    dest_extract_map: HashMap<String, HashSet<String>>,
     /// Field names matched by dest-side `[*].metadata.<field>` wildcard rules.
+    /// A hit here means the field is extracted regardless of resource kind.
     dest_wildcard_fields: HashSet<String>,
 }
 
@@ -73,14 +81,14 @@ impl<'a> Decorator<'a> {
         source_extract_rules: Vec<String>,
         dest_extract_rules: Vec<String>,
     ) -> Self {
-        let (source_extract_set, source_wildcard_fields) =
+        let (source_extract_map, source_wildcard_fields) =
             expand_extract_rules(source_extract_rules);
-        let (dest_extract_set, dest_wildcard_fields) = expand_extract_rules(dest_extract_rules);
+        let (dest_extract_map, dest_wildcard_fields) = expand_extract_rules(dest_extract_rules);
         Self {
             attributor,
-            source_extract_set,
+            source_extract_map,
             source_wildcard_fields,
-            dest_extract_set,
+            dest_extract_map,
             dest_wildcard_fields,
         }
     }
@@ -192,16 +200,18 @@ impl<'a> Decorator<'a> {
     /// Returns `true` if the operator configured either a concrete `resource.metadata.field`
     /// rule or a `[*].metadata.field` wildcard that matches any resource kind.
     ///
-    /// The wildcard check is O(1) with no allocation (uses `field` directly as a `&str` key).
-    /// The specific check allocates one `String` for the key and does a single `HashSet` lookup.
+    /// Both checks are O(1) with no allocation.
     fn should_extract(&self, resource: &str, field: &str, is_source: bool) -> bool {
-        let (set, wildcards) = if is_source {
-            (&self.source_extract_set, &self.source_wildcard_fields)
+        let (map, wildcards) = if is_source {
+            (&self.source_extract_map, &self.source_wildcard_fields)
         } else {
-            (&self.dest_extract_set, &self.dest_wildcard_fields)
+            (&self.dest_extract_map, &self.dest_wildcard_fields)
         };
 
-        wildcards.contains(field) || set.contains(format!("{resource}.metadata.{field}").as_str())
+        wildcards.contains(field)
+            || map
+                .get(resource)
+                .is_some_and(|fields| fields.contains(field))
     }
 
     /// Shared helper to populate standard Kubernetes metadata (Name, UID, Annotations, Namespace).
@@ -576,7 +586,75 @@ pub fn resolve_pod_container_by_port(pod: &Pod, port: u16) -> Option<(String, St
 mod tests {
     use k8s_openapi::api::core::v1::{Container, ContainerPort, Pod, PodSpec};
 
-    use super::resolve_pod_container_by_port;
+    use super::{expand_extract_rules, resolve_pod_container_by_port};
+
+    #[test]
+    fn test_expand_extract_rules() {
+        let rules = vec![
+            "[*].metadata.name".to_string(),
+            "[*].metadata.namespace".to_string(),
+            "pod.metadata.uid".to_string(),
+            "node.metadata.name".to_string(),
+            "invalid_rule".to_string(),
+        ];
+
+        let (specific, wildcards) = expand_extract_rules(rules);
+
+        assert_eq!(wildcards.len(), 2);
+        assert!(wildcards.contains("name"));
+        assert!(wildcards.contains("namespace"));
+
+        assert_eq!(specific.len(), 2);
+        assert_eq!(specific.get("pod").unwrap().len(), 1);
+        assert!(specific.get("pod").unwrap().contains("uid"));
+        assert_eq!(specific.get("node").unwrap().len(), 1);
+        assert!(specific.get("node").unwrap().contains("name"));
+    }
+
+    #[test]
+    fn test_should_extract() {
+        let rules = vec![
+            "pod.metadata.name".to_string(),
+            "[*].metadata.uid".to_string(),
+        ];
+        let (map, wildcards) = expand_extract_rules(rules);
+
+        let check = |kind: &str, field: &str| {
+            wildcards.contains(field) || map.get(kind).is_some_and(|fields| fields.contains(field))
+        };
+
+        assert!(check("pod", "name"));
+        assert!(check("pod", "uid"));
+        assert!(check("node", "uid"));
+        assert!(!check("node", "name"));
+    }
+
+    #[test]
+    fn test_should_extract_with_uncommon_resources() {
+        let rules = vec![
+            "[*].metadata.uid".to_string(),
+            "service.metadata.name".to_string(),
+            "deployment.metadata.labels".to_string(),
+            "mycustomresource.metadata.version".to_string(),
+        ];
+        let (map, wildcards) = expand_extract_rules(rules);
+
+        let check = |kind: &str, field: &str| {
+            wildcards.contains(field) || map.get(kind).is_some_and(|fields| fields.contains(field))
+        };
+
+        assert!(check("service", "name"));
+        assert!(check("service", "uid"));
+
+        assert!(check("deployment", "labels"));
+        assert!(check("deployment", "uid"));
+
+        assert!(check("mycustomresource", "version"));
+        assert!(check("mycustomresource", "uid"));
+
+        assert!(!check("pod", "name"));
+        assert!(!check("service", "labels"));
+    }
 
     /// Helper to create a container with optional ports and image
     fn create_container(name: &str, image: Option<&str>, ports: Option<Vec<i32>>) -> Container {
