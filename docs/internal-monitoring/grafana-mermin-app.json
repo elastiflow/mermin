@@ -103,7 +103,7 @@
         "showThresholdMarkers": true,
         "sizing": "auto"
       },
-      "pluginVersion": "12.3.1",
+      "pluginVersion": "12.4.2",
       "targets": [
         {
           "datasource": {
@@ -113,7 +113,6 @@
           "editorMode": "code",
           "exemplar": false,
           "expr": "sum(mermin_flow_spans_active_total)",
-          "hide": false,
           "instant": false,
           "legendFormat": "Active",
           "range": true,
@@ -126,7 +125,6 @@
           },
           "editorMode": "code",
           "expr": "sum(rate(mermin_flow_spans_created_total[$__rate_interval]))",
-          "hide": false,
           "instant": false,
           "legendFormat": "Rate",
           "range": true,
@@ -185,7 +183,7 @@
         "textMode": "auto",
         "wideLayout": true
       },
-      "pluginVersion": "12.3.1",
+      "pluginVersion": "12.4.2",
       "targets": [
         {
           "editorMode": "code",
@@ -261,13 +259,12 @@
         "showThresholdMarkers": true,
         "sizing": "auto"
       },
-      "pluginVersion": "12.3.1",
+      "pluginVersion": "12.4.2",
       "targets": [
         {
           "editorMode": "code",
           "exemplar": false,
           "expr": "sum(rate(mermin_interface_bytes_total[$__rate_interval]))",
-          "hide": false,
           "instant": false,
           "legendFormat": "Active",
           "range": true,
@@ -338,13 +335,12 @@
         "showThresholdMarkers": true,
         "sizing": "auto"
       },
-      "pluginVersion": "12.3.1",
+      "pluginVersion": "12.4.2",
       "targets": [
         {
           "editorMode": "code",
           "exemplar": false,
           "expr": "sum(rate(mermin_interface_packets_total[$__rate_interval]))",
-          "hide": false,
           "instant": false,
           "legendFormat": "Active",
           "range": true,
@@ -403,7 +399,7 @@
         "textMode": "auto",
         "wideLayout": true
       },
-      "pluginVersion": "12.3.1",
+      "pluginVersion": "12.4.2",
       "targets": [
         {
           "editorMode": "code",
@@ -523,7 +519,7 @@
           "sort": "desc"
         }
       },
-      "pluginVersion": "12.3.1",
+      "pluginVersion": "12.4.2",
       "targets": [
         {
           "datasource": {
@@ -543,7 +539,6 @@
           },
           "editorMode": "code",
           "expr": "sum(mermin_flow_spans_active_total)",
-          "hide": false,
           "legendFormat": "Total",
           "range": true,
           "refId": "B"
@@ -658,7 +653,7 @@
           "sort": "desc"
         }
       },
-      "pluginVersion": "12.3.1",
+      "pluginVersion": "12.4.2",
       "targets": [
         {
           "datasource": {
@@ -678,7 +673,6 @@
           },
           "editorMode": "code",
           "expr": "sum(rate(mermin_flow_spans_created_total[$__rate_interval]))",
-          "hide": false,
           "legendFormat": "Total",
           "range": true,
           "refId": "B"
@@ -852,7 +846,7 @@
           "sort": "desc"
         }
       },
-      "pluginVersion": "12.3.1",
+      "pluginVersion": "12.4.2",
       "targets": [
         {
           "datasource": {
@@ -861,7 +855,6 @@
           },
           "editorMode": "code",
           "expr": "topk($query_top_N, sum(rate(mermin_export_flow_spans_total{status!=\"error\"}[$__rate_interval])) by ($pod_label, exporter, status)) > 0",
-          "hide": false,
           "legendFormat": "{{ $pod_label }}: {{ exporter }}/{{ status }}",
           "range": true,
           "refId": "A"
@@ -873,7 +866,6 @@
           },
           "editorMode": "code",
           "expr": "topk($query_top_N, sum(rate(mermin_export_flow_spans_total{status=\"error\"}[$__rate_interval])) by ($pod_label, exporter, status)) * -1 < 0",
-          "hide": false,
           "legendFormat": "{{ $pod_label }}: {{ exporter }}/{{ status }}",
           "range": true,
           "refId": "B"
@@ -885,7 +877,6 @@
           },
           "editorMode": "code",
           "expr": "sum(rate(mermin_export_flow_spans_total{status=\"error\"}[$__rate_interval])) by (exporter, status) * -1 < 0",
-          "hide": false,
           "legendFormat": "Total: {{ exporter }}/{{ status }}",
           "range": true,
           "refId": "C"
@@ -897,7 +888,6 @@
           },
           "editorMode": "code",
           "expr": "sum(rate(mermin_export_flow_spans_total{status!=\"error\"}[$__rate_interval])) by (exporter, status) > 0",
-          "hide": false,
           "legendFormat": "Total: {{ exporter }}/{{ status }}",
           "range": true,
           "refId": "D"
@@ -1012,7 +1002,7 @@
           "sort": "desc"
         }
       },
-      "pluginVersion": "12.3.1",
+      "pluginVersion": "12.4.2",
       "targets": [
         {
           "datasource": {
@@ -1032,7 +1022,6 @@
           },
           "editorMode": "code",
           "expr": "sum(rate(mermin_interface_packets_total[$__rate_interval]))",
-          "hide": false,
           "legendFormat": "Total",
           "range": true,
           "refId": "B"
@@ -1120,7 +1109,7 @@
           "unit": "s"
         }
       },
-      "pluginVersion": "12.3.1",
+      "pluginVersion": "12.4.2",
       "targets": [
         {
           "datasource": {
@@ -1130,7 +1119,6 @@
           "editorMode": "code",
           "expr": "sum(rate(mermin_pipeline_duration_seconds_bucket{stage=\"export_out\"}[$__rate_interval])) by (le)",
           "format": "heatmap",
-          "hide": false,
           "instant": false,
           "interval": "",
           "legendFormat": "__auto",
@@ -1220,7 +1208,7 @@
           "unit": "spans"
         }
       },
-      "pluginVersion": "12.3.1",
+      "pluginVersion": "12.4.2",
       "targets": [
         {
           "datasource": {
@@ -1230,7 +1218,6 @@
           "editorMode": "code",
           "expr": "sum(rate(mermin_export_batch_size_bucket[$__rate_interval])) by (le)",
           "format": "heatmap",
-          "hide": false,
           "instant": false,
           "interval": "",
           "legendFormat": "__auto",
@@ -1256,7 +1243,6 @@
             "type": "prometheus",
             "uid": "${ds_prometheus}"
           },
-          "description": "",
           "fieldConfig": {
             "defaults": {
               "color": {
@@ -1285,7 +1271,7 @@
             "h": 4,
             "w": 4,
             "x": 0,
-            "y": 343
+            "y": 33
           },
           "id": 49,
           "options": {
@@ -1305,7 +1291,7 @@
             "textMode": "auto",
             "wideLayout": true
           },
-          "pluginVersion": "12.3.1",
+          "pluginVersion": "12.4.2",
           "targets": [
             {
               "editorMode": "code",
@@ -1324,7 +1310,6 @@
               "editorMode": "code",
               "exemplar": false,
               "expr": "avg_over_time(sum(rate(mermin_pipeline_duration_seconds_count{stage=\"flow_producer_out\"}[$__rate_interval])) by (stage)[$__range:])",
-              "hide": false,
               "instant": false,
               "legendFormat": "avg",
               "range": true,
@@ -1338,7 +1323,6 @@
               "editorMode": "code",
               "exemplar": false,
               "expr": "max_over_time(sum(rate(mermin_pipeline_duration_seconds_count{stage=\"flow_producer_out\"}[$__rate_interval])) by (stage)[$__range:])",
-              "hide": false,
               "instant": false,
               "legendFormat": "max",
               "range": true,
@@ -1414,7 +1398,7 @@
             "h": 12,
             "w": 17,
             "x": 4,
-            "y": 343
+            "y": 33
           },
           "id": 50,
           "options": {
@@ -1434,7 +1418,7 @@
               "sort": "desc"
             }
           },
-          "pluginVersion": "12.3.1",
+          "pluginVersion": "12.4.2",
           "targets": [
             {
               "editorMode": "code",
@@ -1452,7 +1436,6 @@
             "type": "prometheus",
             "uid": "${ds_prometheus}"
           },
-          "description": "",
           "fieldConfig": {
             "defaults": {
               "color": {
@@ -1481,7 +1464,7 @@
             "h": 4,
             "w": 4,
             "x": 0,
-            "y": 434
+            "y": 37
           },
           "id": 51,
           "options": {
@@ -1501,7 +1484,7 @@
             "textMode": "auto",
             "wideLayout": true
           },
-          "pluginVersion": "12.3.1",
+          "pluginVersion": "12.4.2",
           "targets": [
             {
               "editorMode": "code",
@@ -1520,7 +1503,6 @@
               "editorMode": "code",
               "exemplar": false,
               "expr": "avg_over_time(sum(rate(mermin_pipeline_duration_seconds_count{stage=\"k8s_decorator_out\"}[$__rate_interval])) by (stage)[$__range:])",
-              "hide": false,
               "instant": false,
               "legendFormat": "avg",
               "range": true,
@@ -1534,7 +1516,6 @@
               "editorMode": "code",
               "exemplar": false,
               "expr": "max_over_time(sum(rate(mermin_pipeline_duration_seconds_count{stage=\"k8s_decorator_out\"}[$__rate_interval])) by (stage)[$__range:])",
-              "hide": false,
               "instant": false,
               "legendFormat": "max",
               "range": true,
@@ -1549,7 +1530,6 @@
             "type": "prometheus",
             "uid": "${ds_prometheus}"
           },
-          "description": "",
           "fieldConfig": {
             "defaults": {
               "color": {
@@ -1578,7 +1558,7 @@
             "h": 4,
             "w": 4,
             "x": 0,
-            "y": 438
+            "y": 41
           },
           "id": 52,
           "options": {
@@ -1598,7 +1578,7 @@
             "textMode": "auto",
             "wideLayout": true
           },
-          "pluginVersion": "12.3.1",
+          "pluginVersion": "12.4.2",
           "targets": [
             {
               "editorMode": "code",
@@ -1617,7 +1597,6 @@
               "editorMode": "code",
               "exemplar": false,
               "expr": "avg_over_time(sum(rate(mermin_pipeline_duration_seconds_count{stage=\"export_out\"}[$__rate_interval])) by (stage)[$__range:])",
-              "hide": false,
               "instant": false,
               "legendFormat": "avg",
               "range": true,
@@ -1631,7 +1610,6 @@
               "editorMode": "code",
               "exemplar": false,
               "expr": "max_over_time(sum(rate(mermin_pipeline_duration_seconds_count{stage=\"export_out\"}[$__rate_interval])) by (stage)[$__range:])",
-              "hide": false,
               "instant": false,
               "legendFormat": "max",
               "range": true,
@@ -1666,7 +1644,7 @@
             "h": 7,
             "w": 8,
             "x": 0,
-            "y": 442
+            "y": 45
           },
           "id": 46,
           "interval": "60s",
@@ -1686,7 +1664,7 @@
             },
             "cellGap": 1,
             "cellValues": {
-              "unit": "updates per sec"
+              "unit": "flows per sec"
             },
             "color": {
               "exponent": 0.5,
@@ -1708,7 +1686,7 @@
             },
             "rowsFrame": {
               "layout": "auto",
-              "value": "Updates"
+              "value": "Flows"
             },
             "tooltip": {
               "mode": "single",
@@ -1721,7 +1699,7 @@
               "unit": "s"
             }
           },
-          "pluginVersion": "12.3.1",
+          "pluginVersion": "12.4.2",
           "targets": [
             {
               "datasource": {
@@ -1731,7 +1709,6 @@
               "editorMode": "code",
               "expr": "sum(rate(mermin_pipeline_duration_seconds_bucket{stage=\"flow_producer_out\"}[$__rate_interval])) by (stage, le)",
               "format": "heatmap",
-              "hide": false,
               "instant": false,
               "interval": "",
               "legendFormat": "__auto",
@@ -1767,7 +1744,7 @@
             "h": 7,
             "w": 8,
             "x": 8,
-            "y": 442
+            "y": 45
           },
           "id": 47,
           "interval": "60s",
@@ -1787,7 +1764,7 @@
             },
             "cellGap": 1,
             "cellValues": {
-              "unit": "updates per sec"
+              "unit": "decorations per sec"
             },
             "color": {
               "exponent": 0.5,
@@ -1809,7 +1786,7 @@
             },
             "rowsFrame": {
               "layout": "auto",
-              "value": "Updates"
+              "value": "Decorations"
             },
             "tooltip": {
               "mode": "single",
@@ -1822,7 +1799,7 @@
               "unit": "s"
             }
           },
-          "pluginVersion": "12.3.1",
+          "pluginVersion": "12.4.2",
           "targets": [
             {
               "datasource": {
@@ -1832,7 +1809,6 @@
               "editorMode": "code",
               "expr": "sum(rate(mermin_pipeline_duration_seconds_bucket{stage=\"k8s_decorator_out\"}[$__rate_interval])) by (stage, le)",
               "format": "heatmap",
-              "hide": false,
               "instant": false,
               "interval": "",
               "legendFormat": "__auto",
@@ -1868,7 +1844,7 @@
             "h": 7,
             "w": 8,
             "x": 16,
-            "y": 442
+            "y": 45
           },
           "id": 48,
           "interval": "60s",
@@ -1888,7 +1864,7 @@
             },
             "cellGap": 1,
             "cellValues": {
-              "unit": "updates per sec"
+              "unit": "exports per sec"
             },
             "color": {
               "exponent": 0.5,
@@ -1910,7 +1886,7 @@
             },
             "rowsFrame": {
               "layout": "auto",
-              "value": "Updates"
+              "value": "Exports"
             },
             "tooltip": {
               "mode": "single",
@@ -1923,7 +1899,7 @@
               "unit": "s"
             }
           },
-          "pluginVersion": "12.3.1",
+          "pluginVersion": "12.4.2",
           "targets": [
             {
               "datasource": {
@@ -1933,7 +1909,6 @@
               "editorMode": "code",
               "expr": "sum(rate(mermin_pipeline_duration_seconds_bucket{stage=\"export_out\"}[$__rate_interval])) by (stage, le)",
               "format": "heatmap",
-              "hide": false,
               "instant": false,
               "interval": "",
               "legendFormat": "__auto",
@@ -2042,7 +2017,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 344
+            "y": 507
           },
           "id": 6,
           "options": {
@@ -2084,7 +2059,6 @@
               },
               "editorMode": "code",
               "expr": "sum(rate(mermin_k8s_decorator_flow_spans_total[$__rate_interval])) by (status)",
-              "hide": false,
               "legendFormat": "Total: {{ status }}",
               "range": true,
               "refId": "B"
@@ -2178,7 +2152,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 344
+            "y": 507
           },
           "id": 24,
           "interval": "60s",
@@ -2210,7 +2184,6 @@
               },
               "editorMode": "code",
               "expr": "topk($query_top_N, sum(rate(mermin_k8s_watcher_ip_index_update_duration_seconds_count[$__rate_interval])) by ($pod_label))",
-              "hide": false,
               "legendFormat": "{{ $pod_label }}",
               "range": true,
               "refId": "A"
@@ -2222,7 +2195,6 @@
               },
               "editorMode": "code",
               "expr": "sum(rate(mermin_k8s_watcher_ip_index_update_duration_seconds_count[$__rate_interval]))",
-              "hide": false,
               "legendFormat": "Total",
               "range": true,
               "refId": "B"
@@ -2316,7 +2288,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 423
+            "y": 586
           },
           "id": 25,
           "interval": "60s",
@@ -2359,7 +2331,6 @@
               },
               "editorMode": "code",
               "expr": "sum(rate(mermin_k8s_watcher_events_total[$__rate_interval])) by (event, kind) > 0",
-              "hide": false,
               "legendFormat": "Total: {{ event }}/{{ kind }}",
               "range": true,
               "refId": "B"
@@ -2393,7 +2364,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 423
+            "y": 586
           },
           "id": 23,
           "interval": "60s",
@@ -2457,7 +2428,6 @@
               "editorMode": "code",
               "expr": "sum(rate(mermin_k8s_watcher_ip_index_update_duration_seconds_bucket[$__rate_interval])) by (le)",
               "format": "heatmap",
-              "hide": false,
               "instant": false,
               "interval": "",
               "legendFormat": "__auto",
@@ -2538,7 +2508,7 @@
             "h": 3,
             "w": 12,
             "x": 0,
-            "y": 106
+            "y": 141
           },
           "id": 29,
           "options": {
@@ -2558,7 +2528,7 @@
             "textMode": "auto",
             "wideLayout": true
           },
-          "pluginVersion": "12.3.1",
+          "pluginVersion": "12.4.2",
           "targets": [
             {
               "datasource": {
@@ -2632,7 +2602,7 @@
             "h": 3,
             "w": 12,
             "x": 12,
-            "y": 106
+            "y": 141
           },
           "id": 28,
           "options": {
@@ -2653,7 +2623,7 @@
             "textMode": "auto",
             "wideLayout": true
           },
-          "pluginVersion": "12.3.1",
+          "pluginVersion": "12.4.2",
           "targets": [
             {
               "datasource": {
@@ -2771,7 +2741,7 @@
             "h": 5,
             "w": 12,
             "x": 0,
-            "y": 109
+            "y": 144
           },
           "id": 43,
           "options": {
@@ -2793,7 +2763,7 @@
               "sort": "desc"
             }
           },
-          "pluginVersion": "12.3.1",
+          "pluginVersion": "12.4.2",
           "targets": [
             {
               "datasource": {
@@ -2894,7 +2864,7 @@
             "h": 5,
             "w": 12,
             "x": 12,
-            "y": 109
+            "y": 144
           },
           "id": 22,
           "options": {
@@ -2916,7 +2886,7 @@
               "sort": "desc"
             }
           },
-          "pluginVersion": "12.3.1",
+          "pluginVersion": "12.4.2",
           "targets": [
             {
               "datasource": {
@@ -3013,7 +2983,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 114
+            "y": 149
           },
           "id": 26,
           "options": {
@@ -3033,7 +3003,7 @@
               "sort": "desc"
             }
           },
-          "pluginVersion": "12.3.1",
+          "pluginVersion": "12.4.2",
           "targets": [
             {
               "datasource": {
@@ -3042,7 +3012,6 @@
               },
               "editorMode": "code",
               "expr": "topk($query_top_N ,sum(mermin_taskmanager_tasks_active) by ($pod_label, task))",
-              "hide": false,
               "legendFormat": "Active: {{ $pod_label }}/{{ task }}",
               "range": true,
               "refId": "A"
@@ -3119,7 +3088,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 114
+            "y": 149
           },
           "id": 5,
           "options": {
@@ -3141,7 +3110,7 @@
               "sort": "desc"
             }
           },
-          "pluginVersion": "12.3.1",
+          "pluginVersion": "12.4.2",
           "targets": [
             {
               "datasource": {
@@ -3226,7 +3195,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 123
+            "y": 158
           },
           "id": 27,
           "options": {
@@ -3248,7 +3217,7 @@
               "sort": "desc"
             }
           },
-          "pluginVersion": "12.3.1",
+          "pluginVersion": "12.4.2",
           "targets": [
             {
               "datasource": {
@@ -3364,7 +3333,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 123
+            "y": 158
           },
           "id": 33,
           "options": {
@@ -3384,7 +3353,7 @@
               "sort": "desc"
             }
           },
-          "pluginVersion": "12.3.1",
+          "pluginVersion": "12.4.2",
           "targets": [
             {
               "datasource": {
@@ -3393,7 +3362,6 @@
               },
               "editorMode": "code",
               "expr": "sum(rate(mermin_ebpf_map_ops_total{status=\"ok\"}[$__rate_interval])) by (map, operation, status)",
-              "hide": false,
               "legendFormat": "Total: {{ map }}/{{ operation }}/{{ status }}",
               "range": true,
               "refId": "A"
@@ -3405,7 +3373,6 @@
               },
               "editorMode": "code",
               "expr": "sum(rate(mermin_ebpf_map_ops_total{status=\"not_found\"}[$__rate_interval])) by (map, operation, status)",
-              "hide": false,
               "legendFormat": "Total: {{ map }}/{{ operation }}/{{ status }}",
               "range": true,
               "refId": "B"
@@ -3417,7 +3384,6 @@
               },
               "editorMode": "code",
               "expr": "sum(rate(mermin_ebpf_map_ops_total{status=\"error\"}[$__rate_interval])) by (map, operation, status) * -1",
-              "hide": false,
               "legendFormat": "Total: {{ map }}/{{ operation }}/{{ status }}",
               "range": true,
               "refId": "C"
@@ -3508,7 +3474,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 346
+            "y": 509
           },
           "id": 34,
           "options": {
@@ -3646,7 +3612,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 346
+            "y": 509
           },
           "id": 30,
           "options": {
@@ -3675,7 +3641,6 @@
               },
               "editorMode": "code",
               "expr": "topk($query_top_N ,sum(rate(mermin_ebpf_map_ops_total{map=\"$ebpf_map\", status=\"ok\"}[$__rate_interval])) by ($pod_label, map, operation, status))",
-              "hide": false,
               "legendFormat": "{{ $pod_label }}: {{ map }}/{{ operation }}/{{ status }}",
               "range": true,
               "refId": "A"
@@ -3687,7 +3652,6 @@
               },
               "editorMode": "code",
               "expr": "topk($query_top_N ,sum(rate(mermin_ebpf_map_ops_total{map=\"$ebpf_map\", status=\"not_found\"}[$__rate_interval])) by ($pod_label, map, operation, status))",
-              "hide": false,
               "legendFormat": "{{ $pod_label }}: {{ map }}/{{ operation }}/{{ status }}",
               "range": true,
               "refId": "B"
@@ -3699,7 +3663,6 @@
               },
               "editorMode": "code",
               "expr": "topk($query_top_N ,sum(rate(mermin_ebpf_map_ops_total{map=\"$ebpf_map\", status=\"error\"}[$__rate_interval])) by ($pod_label, map, operation, status)) * -1",
-              "hide": false,
               "legendFormat": "{{ $pod_label }}: {{ operation }}/{{ status }}",
               "range": true,
               "refId": "C"
@@ -3750,7 +3713,8 @@
           }
         ],
         "query": "pod",
-        "type": "custom"
+        "type": "custom",
+        "valuesFormat": "csv"
       },
       {
         "current": {
@@ -3793,7 +3757,8 @@
           }
         ],
         "query": "3, 5, 10, 25, 50, 100",
-        "type": "custom"
+        "type": "custom",
+        "valuesFormat": "csv"
       },
       {
         "baseFilters": [],
@@ -3825,6 +3790,7 @@
         },
         "refresh": 1,
         "regex": "",
+        "regexApplyTo": "value",
         "type": "query"
       }
     ]
@@ -3837,5 +3803,6 @@
   "timezone": "browser",
   "title": "Mermin Application",
   "uid": "mermin_app",
-  "version": 1
+  "version": 1,
+  "weekStart": ""
 }
