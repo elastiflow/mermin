@@ -118,7 +118,7 @@ ENTRYPOINT ["/usr/bin/mermin"]
 
 # ---- Runtime Stage ----
 # Use a distroless base image for the final container with shell support
-FROM debian:13.2-slim AS runner-debug
+FROM debian:13.4-slim AS runner-debug
 ARG APP_ROOT APP
 
 COPY --from=builder ${APP_ROOT}/target/release/${APP} /usr/bin/${APP}
