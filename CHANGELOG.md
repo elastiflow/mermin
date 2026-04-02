@@ -1,3 +1,15 @@
+## [v0.3.5] - 2026-04-02
+
+### Bug Fixes
+
+- **ci:** Bump the  GHA (#546)
+- **ci:** Bump the  when releasing Mermin (#548)
+- Docker debug image vulnerabilities (#551)
+
+[v0.3.4..v0.3.5](https://github.com/elastiflow/mermin/compare/v0.3.4...v0.3.5)
+
+
+
 ## [v0.3.4] - 2026-03-24
 
 ### Bug Fixes
