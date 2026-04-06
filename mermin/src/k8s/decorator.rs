@@ -124,7 +124,7 @@ impl<'a> Decorator<'a> {
         let src_port = flow_span.attributes.source_port;
         let dst_port = flow_span.attributes.destination_port;
 
-        let src_info = self.enrich(ctx.src_pod.as_deref(), ctx.src_ip).await;
+        let src_info = self.enrich(ctx.src_pod.as_deref(), ctx.src_ip, true).await;
         if let Some(info) = &src_info {
             self.populate_k8s_attributes(
                 &mut flow_span,
@@ -135,7 +135,7 @@ impl<'a> Decorator<'a> {
             );
         }
 
-        let dst_info = self.enrich(ctx.dst_pod.as_deref(), ctx.dst_ip).await;
+        let dst_info = self.enrich(ctx.dst_pod.as_deref(), ctx.dst_ip, false).await;
         if let Some(info) = &dst_info {
             self.populate_k8s_attributes(
                 &mut flow_span,
@@ -157,12 +157,19 @@ impl<'a> Decorator<'a> {
 
     /// Resolves a pod and IP address to Kubernetes resource decoration information.
     /// Returns Pod decoration if available, otherwise attempts IP-based fallback resolution.
-    async fn enrich(&self, pod: Option<&Pod>, ip: IpAddr) -> Option<DecorationInfo> {
+    async fn enrich(
+        &self,
+        pod: Option<&Pod>,
+        ip: IpAddr,
+        is_source: bool,
+    ) -> Option<DecorationInfo> {
+        let extract_fn = |kind: &str, field: &str| self.should_extract(kind, field, is_source);
+
         if let Some(pod) = pod {
-            let pod_meta = K8sObjectMeta::from(pod);
-            let node_name = pod.spec.as_ref()?.node_name.clone();
-            let owners = self.attributor.get_owners(pod);
-            let selector_relations = self.attributor.get_selector_based_metadata(pod);
+            let pod_meta = K8sObjectMeta::from_resource(pod, extract_fn);
+            let node_name = pod.spec.as_ref().and_then(|s| s.node_name.clone());
+            let owners = self.attributor.get_owners(pod, extract_fn);
+            let selector_relations = self.attributor.get_selector_based_metadata(pod, extract_fn);
             return Some(DecorationInfo::Pod {
                 pod: pod_meta,
                 node_name,
@@ -173,19 +180,19 @@ impl<'a> Decorator<'a> {
 
         if let Some(service) = self.attributor.get_service_by_ip(ip).await {
             return Some(DecorationInfo::Service {
-                service: K8sObjectMeta::from(service.as_ref()),
+                service: K8sObjectMeta::from_resource(service.as_ref(), extract_fn),
             });
         }
 
         if let Some(node) = self.attributor.get_node_by_ip(ip).await {
             return Some(DecorationInfo::Node {
-                node: K8sObjectMeta::from(node.as_ref()),
+                node: K8sObjectMeta::from_resource(node.as_ref(), extract_fn),
             });
         }
 
         if let Some(slice) = self.attributor.get_endpointslice_by_ip(ip).await {
             return Some(DecorationInfo::EndpointSlice {
-                slice: K8sObjectMeta::from(slice.as_ref()),
+                slice: K8sObjectMeta::from_resource(slice.as_ref(), extract_fn),
             });
         }
 
@@ -654,6 +661,25 @@ mod tests {
 
         assert!(!check("pod", "name"));
         assert!(!check("service", "labels"));
+    }
+
+    #[test]
+    fn test_should_extract_with_wildcards() {
+        let rules = vec![
+            "[*].metadata.name".to_string(),
+            "[*].metadata.namespace".to_string(),
+        ];
+        let (map, wildcards) = expand_extract_rules(rules);
+
+        let check = |kind: &str, field: &str| {
+            wildcards.contains(field) || map.get(kind).is_some_and(|fields| fields.contains(field))
+        };
+
+        assert!(check("pod", "name"));
+        assert!(check("pod", "namespace"));
+        assert!(check("service", "name"));
+        assert!(check("node", "name"));
+        assert!(!check("pod", "uid"));
     }
 
     /// Helper to create a container with optional ports and image

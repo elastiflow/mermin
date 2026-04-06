@@ -85,6 +85,7 @@ impl SelectorRelationsManager {
         pod_labels: &BTreeMap<String, String>,
         pod_namespace: &str,
         store: &ResourceStore,
+        extract_fn: impl Fn(&str, &str) -> bool,
     ) -> Option<Vec<K8sObjectMeta>> {
         let mut related = Vec::new();
 
@@ -101,6 +102,7 @@ impl SelectorRelationsManager {
                         pod_namespace,
                         rule,
                         store,
+                        &extract_fn,
                     ));
                 }
                 "service" => {
@@ -109,6 +111,7 @@ impl SelectorRelationsManager {
                         pod_namespace,
                         rule,
                         store,
+                        &extract_fn,
                     ));
                 }
                 "replicaset" => {
@@ -117,6 +120,7 @@ impl SelectorRelationsManager {
                         pod_namespace,
                         rule,
                         store,
+                        &extract_fn,
                     ));
                 }
                 "deployment" => {
@@ -125,6 +129,7 @@ impl SelectorRelationsManager {
                         pod_namespace,
                         rule,
                         store,
+                        &extract_fn,
                     ));
                 }
                 "statefulset" => {
@@ -133,6 +138,7 @@ impl SelectorRelationsManager {
                         pod_namespace,
                         rule,
                         store,
+                        &extract_fn,
                     ));
                 }
                 "daemonset" => {
@@ -141,10 +147,17 @@ impl SelectorRelationsManager {
                         pod_namespace,
                         rule,
                         store,
+                        &extract_fn,
                     ));
                 }
                 "job" => {
-                    related.extend(self.find_matching_jobs(pod_labels, pod_namespace, rule, store));
+                    related.extend(self.find_matching_jobs(
+                        pod_labels,
+                        pod_namespace,
+                        rule,
+                        store,
+                        &extract_fn,
+                    ));
                 }
                 "cronjob" => {
                     related.extend(self.find_matching_cronjobs(
@@ -152,6 +165,7 @@ impl SelectorRelationsManager {
                         pod_namespace,
                         rule,
                         store,
+                        &extract_fn,
                     ));
                 }
                 _ => {
@@ -177,6 +191,7 @@ impl SelectorRelationsManager {
         pod_namespace: &str,
         rule: &NormalizedRule,
         store: &ResourceStore,
+        extract_fn: &impl Fn(&str, &str) -> bool,
     ) -> Vec<K8sObjectMeta> {
         store
             .get_by_namespace::<NetworkPolicy>(pod_namespace)
@@ -184,7 +199,7 @@ impl SelectorRelationsManager {
             .filter_map(|policy| {
                 let selector = self.extract_selector_from_network_policy(policy, rule)?;
                 self.selector_matches(&selector, pod_labels)
-                    .then(|| K8sObjectMeta::from(policy.as_ref()))
+                    .then(|| K8sObjectMeta::from_resource(policy.as_ref(), extract_fn))
             })
             .collect()
     }
@@ -195,6 +210,7 @@ impl SelectorRelationsManager {
         pod_namespace: &str,
         rule: &NormalizedRule,
         store: &ResourceStore,
+        extract_fn: &impl Fn(&str, &str) -> bool,
     ) -> Vec<K8sObjectMeta> {
         store
             .get_by_namespace::<Service>(pod_namespace)
@@ -202,7 +218,7 @@ impl SelectorRelationsManager {
             .filter_map(|service| {
                 let selector = self.extract_selector_from_service(service, rule)?;
                 self.selector_matches(&selector, pod_labels)
-                    .then(|| K8sObjectMeta::from(service.as_ref()))
+                    .then(|| K8sObjectMeta::from_resource(service.as_ref(), extract_fn))
             })
             .collect()
     }
@@ -250,6 +266,7 @@ impl SelectorRelationsManager {
         pod_namespace: &str,
         rule: &NormalizedRule,
         store: &ResourceStore,
+        extract_fn: &impl Fn(&str, &str) -> bool,
     ) -> Vec<K8sObjectMeta> {
         store
             .get_by_namespace::<ReplicaSet>(pod_namespace)
@@ -257,7 +274,7 @@ impl SelectorRelationsManager {
             .filter_map(|rs| {
                 let selector = self.extract_selector_from_replicaset(rs, rule)?;
                 self.selector_matches(&selector, pod_labels)
-                    .then(|| K8sObjectMeta::from(rs.as_ref()))
+                    .then(|| K8sObjectMeta::from_resource(rs.as_ref(), extract_fn))
             })
             .collect()
     }
@@ -281,6 +298,7 @@ impl SelectorRelationsManager {
         pod_namespace: &str,
         rule: &NormalizedRule,
         store: &ResourceStore,
+        extract_fn: &impl Fn(&str, &str) -> bool,
     ) -> Vec<K8sObjectMeta> {
         store
             .get_by_namespace::<Deployment>(pod_namespace)
@@ -288,7 +306,7 @@ impl SelectorRelationsManager {
             .filter_map(|deployment| {
                 let selector = self.extract_selector_from_deployment(deployment, rule)?;
                 self.selector_matches(&selector, pod_labels)
-                    .then(|| K8sObjectMeta::from(deployment.as_ref()))
+                    .then(|| K8sObjectMeta::from_resource(deployment.as_ref(), extract_fn))
             })
             .collect()
     }
@@ -312,6 +330,7 @@ impl SelectorRelationsManager {
         pod_namespace: &str,
         rule: &NormalizedRule,
         store: &ResourceStore,
+        extract_fn: &impl Fn(&str, &str) -> bool,
     ) -> Vec<K8sObjectMeta> {
         store
             .get_by_namespace::<StatefulSet>(pod_namespace)
@@ -319,7 +338,7 @@ impl SelectorRelationsManager {
             .filter_map(|sts| {
                 let selector = self.extract_selector_from_statefulset(sts, rule)?;
                 self.selector_matches(&selector, pod_labels)
-                    .then(|| K8sObjectMeta::from(sts.as_ref()))
+                    .then(|| K8sObjectMeta::from_resource(sts.as_ref(), extract_fn))
             })
             .collect()
     }
@@ -343,6 +362,7 @@ impl SelectorRelationsManager {
         pod_namespace: &str,
         rule: &NormalizedRule,
         store: &ResourceStore,
+        extract_fn: &impl Fn(&str, &str) -> bool,
     ) -> Vec<K8sObjectMeta> {
         store
             .get_by_namespace::<DaemonSet>(pod_namespace)
@@ -350,7 +370,7 @@ impl SelectorRelationsManager {
             .filter_map(|ds| {
                 let selector = self.extract_selector_from_daemonset(ds, rule)?;
                 self.selector_matches(&selector, pod_labels)
-                    .then(|| K8sObjectMeta::from(ds.as_ref()))
+                    .then(|| K8sObjectMeta::from_resource(ds.as_ref(), extract_fn))
             })
             .collect()
     }
@@ -374,6 +394,7 @@ impl SelectorRelationsManager {
         pod_namespace: &str,
         rule: &NormalizedRule,
         store: &ResourceStore,
+        extract_fn: &impl Fn(&str, &str) -> bool,
     ) -> Vec<K8sObjectMeta> {
         store
             .get_by_namespace::<Job>(pod_namespace)
@@ -381,7 +402,7 @@ impl SelectorRelationsManager {
             .filter_map(|job| {
                 let selector = self.extract_selector_from_job(job, rule)?;
                 self.selector_matches(&selector, pod_labels)
-                    .then(|| K8sObjectMeta::from(job.as_ref()))
+                    .then(|| K8sObjectMeta::from_resource(job.as_ref(), extract_fn))
             })
             .collect()
     }
@@ -401,6 +422,7 @@ impl SelectorRelationsManager {
         pod_namespace: &str,
         rule: &NormalizedRule,
         store: &ResourceStore,
+        extract_fn: &impl Fn(&str, &str) -> bool,
     ) -> Vec<K8sObjectMeta> {
         store
             .get_by_namespace::<CronJob>(pod_namespace)
@@ -408,7 +430,7 @@ impl SelectorRelationsManager {
             .filter_map(|cronjob| {
                 let selector = self.extract_selector_from_cronjob(cronjob, rule)?;
                 self.selector_matches(&selector, pod_labels)
-                    .then(|| K8sObjectMeta::from(cronjob.as_ref()))
+                    .then(|| K8sObjectMeta::from_resource(cronjob.as_ref(), extract_fn))
             })
             .collect()
     }

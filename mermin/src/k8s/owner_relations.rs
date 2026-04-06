@@ -79,8 +79,13 @@ impl OwnerRelationsManager {
     /// Returns the filtered list of WorkloadOwners that should be included in
     /// flow metadata. Returns None if no owners are found or all are filtered out.
     #[must_use]
-    pub fn get_owners(&self, pod: &Pod, store: &ResourceStore) -> Option<Vec<WorkloadOwner>> {
-        let all_owners = self.walk_owner_chain(pod, store);
+    pub fn get_owners(
+        &self,
+        pod: &Pod,
+        store: &ResourceStore,
+        extract_fn: impl Fn(&str, &str) -> bool,
+    ) -> Option<Vec<WorkloadOwner>> {
+        let all_owners = self.walk_owner_chain(pod, store, &extract_fn);
 
         if all_owners.is_empty() {
             return None;
@@ -95,7 +100,12 @@ impl OwnerRelationsManager {
         }
     }
 
-    fn walk_owner_chain(&self, pod: &Pod, store: &ResourceStore) -> Vec<WorkloadOwner> {
+    fn walk_owner_chain(
+        &self,
+        pod: &Pod,
+        store: &ResourceStore,
+        extract_fn: &impl Fn(&str, &str) -> bool,
+    ) -> Vec<WorkloadOwner> {
         let mut all_owners = Vec::with_capacity(self.max_depth.min(8));
         let mut current_owners = pod.owner_references().to_vec();
         let mut namespace = pod.namespace().unwrap_or_default();
@@ -108,7 +118,7 @@ impl OwnerRelationsManager {
 
             for owner_ref in current_owners {
                 if let Some((owner, next_owners_opt)) =
-                    self.lookup_owner(&owner_ref, &namespace, store)
+                    self.lookup_owner(&owner_ref, &namespace, store, extract_fn)
                 {
                     all_owners.push(owner.clone());
 
@@ -180,6 +190,7 @@ impl OwnerRelationsManager {
         owner_ref: &OwnerReference,
         namespace: &str,
         store: &ResourceStore,
+        extract_fn: &impl Fn(&str, &str) -> bool,
     ) -> Option<(WorkloadOwner, Option<Vec<OwnerReference>>)> {
         let name = &owner_ref.name;
 
@@ -190,7 +201,7 @@ impl OwnerRelationsManager {
                     .into_iter()
                     .find(|obj| obj.name_any() == *name)
                     .map(|obj| {
-                        let meta = K8sObjectMeta::from(obj.as_ref());
+                        let meta = K8sObjectMeta::from_resource(obj.as_ref(), extract_fn);
                         let next_owners = obj.meta().owner_references.clone();
                         (WorkloadOwner::$variant(meta), next_owners)
                     })
