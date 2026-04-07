@@ -1,3 +1,17 @@
+## [v0.3.6] - 2026-04-07
+
+### Bug Fixes
+
+- Wrong renovate config (#557)
+- **deps:** Update github actions (#563)
+- **deps:** Update pre-commit hook pre-commit/pre-commit-hooks to v6 (#562)
+- **deps:** Pin dependencies (#560)
+- **deps:** Update pre commit (#561)
+
+[v0.3.5..v0.3.6](https://github.com/elastiflow/mermin/compare/v0.3.5...v0.3.6)
+
+
+
 ## [v0.3.5] - 2026-04-02
 
 ### Bug Fixes
