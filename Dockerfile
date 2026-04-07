@@ -33,6 +33,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     procps \
     bpftool \
     iproute2 \
+    pkg-config \
+    libssl-dev \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
