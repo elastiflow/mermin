@@ -106,7 +106,9 @@ jobs:
           docker-compose --version
 
       - name: Make test script executable
-        run: chmod +x ${{ inputs.test-path }}
+        env:
+          TEST_PATH: ${{ inputs.test-path }}
+        run: chmod +x ${TEST_PATH}
 
       - name: Run E2E Test for ${{ matrix.cni }}
         env:

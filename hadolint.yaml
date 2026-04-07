@@ -1,0 +1,2 @@
+ignored:
+  - DL3002 # root is needed due to eBPF
