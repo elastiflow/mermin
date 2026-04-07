@@ -4,7 +4,7 @@ fullnameOverride: ""
 image:
   repository: mack/rakyll-hey
   pullPolicy: IfNotPresent
-  tag: "latest"
+  tag: "latest@sha256:70be13376aafc696314ec00d4d4d7780a62bbe63d3d943cd256e4660e27f1b5c"
 
 # global common labels, applied to all resources
 commonLabels: {}
