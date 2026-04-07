@@ -25,3 +25,8 @@ repos:
     rev: v0.1.30 # Get the latest from: https://github.com/gruntwork-io/pre-commit/releases
     hooks:
       - id: terragrunt-hcl-fmt
+  - repo: https://github.com/semgrep/pre-commit
+    rev: 'v1.156.0'
+    hooks:
+      - id: semgrep
+        entry: semgrep

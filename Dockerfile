@@ -9,6 +9,7 @@ FROM rust:1.88.0-trixie AS base
 
 # Since Mermin needs root to be ran, switching to non-root in in the base/builder stages does not improve the security.
 # hadolint ignore=DL3002 # root is needed due to eBPF
+# nosemgrep: last-user-is-root
 USER root
 
 # Install Dev Container essentials

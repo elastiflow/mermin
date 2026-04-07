@@ -133,8 +133,10 @@ jobs:
       - name: Install Helm
         uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2 # v5.0.0
       - name: Install Helm dependencies
+        env:
+          CHARTS_DIR: ${{ inputs.chart_dir }}
         run: |
-          (helm dependency list ${{ inputs.chart_dir }} || true) | grep -E 'https://' | while read -r dep; do
+          (helm dependency list ${CHARTS_DIR} || true) | grep -E 'https://' | while read -r dep; do
             helm repo add $(echo ${dep} | awk '{print $1}') $(echo ${dep} | awk '{print $4}')
           done
       - name: Install chart-releaser
@@ -144,8 +146,10 @@ jobs:
         with:
           install_only: true
       - name: Package helm chart
+        env:
+          CHARTS_DIR: ${{ inputs.chart_dir }}
         run: |
-          cr package ${{ inputs.chart_dir }}
+          cr package ${CHARTS_DIR}
       - name: Create GH release
         if: ${{ fromJson(steps.prepare_release.outputs.new_release_published) }}
         uses: softprops/action-gh-release@72f2c25fcb47643c292f7107632f7a47c1df5cd8 # v2.3.2
@@ -159,6 +163,10 @@ jobs:
           make_latest: true
           files: ".cr-release-packages/${{ inputs.chart_name }}*.tgz"
       - name: Update GH pages index
+        env:
+          REPO_OWNER: ${{ inputs.repository_name }}
+          REPO_NAME: ${{ inputs.repository_name }}
+          REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir .cr-index
-          cr index --push -t ${{ secrets.GITHUB_TOKEN }} --owner ${{ github.repository_owner }} --git-repo ${{ inputs.repository_name }}
+          cr index --push -t ${REPO_TOKEN} --owner ${REPO_OWNER} --git-repo ${REPO_NAME}
