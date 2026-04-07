@@ -58,9 +58,11 @@ jobs:
           cache_to: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-ci-runner-debug-linux/amd64,mode=max
 
       - name: Save Docker image as an artifact
+        env:
+          IMAGE_TAG: ${{ inputs.image-tag }}
         run: |
           mkdir -p image-artifact
-          docker save not-exists.elastiflow.com/mermin:${{ inputs.image-tag }} -o image-artifact/mermin-${{ inputs.image-tag }}.tar
+          docker save not-exists.elastiflow.com/mermin:${IMAGE_TAG} -o image-artifact/mermin-${IMAGE_TAG}.tar
 
       - name: Upload image artifact
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
@@ -93,7 +95,9 @@ jobs:
           path: image-artifact/
 
       - name: Load Docker image
-        run: docker load < image-artifact/mermin-${{ inputs.image-tag }}.tar
+        env:
+          IMAGE_TAG: ${{ inputs.image-tag }}
+        run: docker load < image-artifact/mermin-${IMAGE_TAG}.tar
 
       - name: Install Docker Compose
         run: |
@@ -102,7 +106,9 @@ jobs:
           docker-compose --version
 
       - name: Make test script executable
-        run: chmod +x ${{ inputs.test-path }}
+        env:
+          TEST_PATH: ${{ inputs.test-path }}
+        run: chmod +x ${TEST_PATH}
 
       - name: Run E2E Test for ${{ matrix.cni }}
         env:
@@ -111,4 +117,5 @@ jobs:
           DOCKER_IMAGE_TAG: ${{ inputs.image-tag }}
           HOST_DOCKER_INTERNAL_ADDR: 172.17.0.1
           MERMIN_CONFIG_PATH: docs/deployment/examples/local/config.example.hcl
-        run: ${{ inputs.test-path }}
+          TEST_PATH: ${{ inputs.test-path }}
+        run: ${TEST_PATH}

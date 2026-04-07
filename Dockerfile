@@ -1,4 +1,5 @@
 # syntax=docker/dockerfile:1.7-labs
+# nosemgrep: dockerfile.security.last-user-is-root.last-user-is-root
 # Using "labs" due to "COPY --parents", https://docs.docker.com/reference/dockerfile/#copy---parents
 ARG APP_ROOT=/app
 ARG APP=mermin
@@ -8,7 +9,7 @@ ARG APP=mermin
 FROM rust:1.88.0-trixie AS base
 
 # Since Mermin needs root to be ran, switching to non-root in in the base/builder stages does not improve the security.
-# hadolint ignore=DL3002 # root is needed due to eBPF
+# nosemgrep: dockerfile.security.last-user-is-root.last-user-is-root # root is needed due to eBPF
 USER root
 
 # Install Dev Container essentials
