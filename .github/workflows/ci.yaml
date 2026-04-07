@@ -18,6 +18,14 @@ jobs:
       }}
     uses: elastiflow/gha-reusable/.github/workflows/reusable_pr_checks.yml@v0
 
+  mandatory_checks:
+    name: Security checks
+    uses: elastiflow/gha-reusable/.github/workflows/reusable_mandatory_checks.yml@v0
+
+  renovate_checks:
+    name: Security checks
+    uses: elastiflow/gha-reusable/.github/workflows/reusable_renovate_checks.yml@v0
+
   fmt:
     name: Check Formatting
     runs-on: ubuntu-latest
