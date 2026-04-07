@@ -1190,15 +1190,15 @@ checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
 
 [[package]]
 name = "hcl-edit"
-version = "0.9.5"
+version = "0.9.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e563477c1d5727912396fdca1ec56c33a12e2d4a4bd16702f8588348689a9e6"
+checksum = "f641e65979f9c567246f13f9c64f7af41b3476e3171a63b10b36778af95b267b"
 dependencies = [
  "fnv",
  "hcl-primitives",
  "pratt",
  "vecmap-rs",
- "winnow",
+ "winnow 1.0.1",
 ]
 
 [[package]]
@@ -1216,9 +1216,9 @@ dependencies = [
 
 [[package]]
 name = "hcl-rs"
-version = "0.19.6"
+version = "0.19.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a381780225f5991adbb268cac33939382ac44f98d6e8e639e06ba0ffe3378e5a"
+checksum = "153fc72c1037f6933efe01c1c769235479e995fb82a799c5716dabad7375b671"
 dependencies = [
  "hcl-edit",
  "hcl-primitives",
@@ -3668,7 +3668,7 @@ dependencies = [
  "toml_datetime 0.7.5+spec-1.1.0",
  "toml_parser",
  "toml_writer",
- "winnow",
+ "winnow 0.7.15",
 ]
 
 [[package]]
@@ -3700,7 +3700,7 @@ dependencies = [
  "serde_spanned 0.6.9",
  "toml_datetime 0.6.11",
  "toml_write",
- "winnow",
+ "winnow 0.7.15",
 ]
 
 [[package]]
@@ -3709,7 +3709,7 @@ version = "1.0.9+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "702d4415e08923e7e1ef96cd5727c0dfed80b4d2fa25db9647fe5eb6f7c5a4c4"
 dependencies = [
- "winnow",
+ "winnow 0.7.15",
 ]
 
 [[package]]
@@ -4467,6 +4467,15 @@ name = "winnow"
 version = "0.7.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df79d97927682d2fd8adb29682d1140b343be4ac0f08fd68b7765d9c059d3945"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
+name = "winnow"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09dac053f1cd375980747450bfc7250c264eaae0583872e845c0c7cd578872b5"
 dependencies = [
  "memchr",
 ]
