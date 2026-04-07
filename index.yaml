@@ -476,6 +476,49 @@ entries:
         - name: Chart Source
           url: https://github.com/elastiflow/mermin
     apiVersion: v2
+    appVersion: 0.3.2
+    created: "2026-04-07T14:38:17.501235356Z"
+    dependencies:
+    - condition: mermin.enabled
+      name: mermin
+      repository: https://elastiflow.github.io/mermin/
+      version: '>= 0.3.5'
+    - condition: netobserv-flow.enabled
+      name: netobserv-flow
+      repository: https://elastiflow.github.io/helm-chart-netobserv/
+      version: '>= 0.9.0'
+    - condition: opensearch.enabled
+      name: opensearch
+      repository: https://opensearch-project.github.io/helm-charts/
+      version: '>= 3.5.0'
+    - condition: opensearch-dashboards.enabled
+      name: opensearch-dashboards
+      repository: https://opensearch-project.github.io/helm-charts/
+      version: '>= 3.5.0'
+    description: A Helm chart for deploying the Mermin eBPF agent
+    digest: ed676cba92a82b4cd465e087ba78e37c1ad88054758e739d9b297ff3eab220f6
+    icon: https://res.cloudinary.com/elastiflow-cloudinary/image/upload/v1746227898/mermin-horizontal_kxhvzo.png
+    keywords:
+    - netflow
+    - network
+    - flow
+    - observability
+    maintainers:
+    - email: engineering@elastiflow.com
+      name: ElastiFlow Engineering Team
+    name: mermin-netobserv-os-stack
+    sources:
+    - https://github.com/elastiflow/mermin
+    type: application
+    urls:
+    - https://github.com/elastiflow/mermin/releases/download/mermin-netobserv-os-stack-0.3.2/mermin-netobserv-os-stack-0.3.2.tgz
+    version: 0.3.2
+  - annotations:
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: |
+        - name: Chart Source
+          url: https://github.com/elastiflow/mermin
+    apiVersion: v2
     appVersion: 0.3.1
     created: "2026-03-16T14:31:01.306994737Z"
     dependencies:
@@ -943,4 +986,4 @@ entries:
     urls:
     - https://github.com/elastiflow/mermin/releases/download/mermin-netobserv-os-stack-0.1.0-beta.12/mermin-netobserv-os-stack-0.1.0-beta.12.tgz
     version: 0.1.0-beta.12
-generated: "2026-04-02T18:56:36.796220111Z"
+generated: "2026-04-07T14:38:17.501410449Z"
