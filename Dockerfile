@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.7-labs
+# syntax=docker/dockerfile:1.23-labs@sha256:7eca9451d94f9b8ad22e44988b92d595d3e4d65163794237949a8c3413fbed5d
 # nosemgrep: dockerfile.security.last-user-is-root.last-user-is-root
 # Using "labs" due to "COPY --parents", https://docs.docker.com/reference/dockerfile/#copy---parents
 ARG APP_ROOT=/app
@@ -6,7 +6,7 @@ ARG APP=mermin
 
 
 # ---- Build Stage ----
-FROM rust:1.88.0-trixie AS base
+FROM rust:1.88.0-trixie@sha256:9a7159329166b45f453351a077367f501aa3e98378f7e327530e7966a139d05f AS base
 
 # Since Mermin needs root to be ran, switching to non-root in in the base/builder stages does not improve the security.
 # nosemgrep: dockerfile.security.last-user-is-root.last-user-is-root # root is needed due to eBPF
@@ -111,7 +111,7 @@ RUN cargo build --release
 # ---- Runtime Stage ----
 # Use a distroless base image for the final container without shell support
 # hadolint ignore=DL3006 # gcr.io/distroless/cc-debian12 don't have tags
-FROM gcr.io/distroless/cc-debian13 AS runner
+FROM gcr.io/distroless/cc-debian13@sha256:e1cc90d06703f5dc30ae869fbfce78fce688f21a97efecd226375233a882e62f AS runner
 ARG APP_ROOT APP
 
 COPY --from=builder ${APP_ROOT}/target/release/${APP} /usr/bin/${APP}
@@ -119,7 +119,7 @@ ENTRYPOINT ["/usr/bin/mermin"]
 
 # ---- Runtime Stage ----
 # Use a distroless base image for the final container with shell support
-FROM debian:13.4-slim AS runner-debug
+FROM debian:13.4-slim@sha256:4ffb3a1511099754cddc70eb1b12e50ffdb67619aa0ab6c13fcd800a78ef7c7a AS runner-debug
 ARG APP_ROOT APP
 
 COPY --from=builder ${APP_ROOT}/target/release/${APP} /usr/bin/${APP}
