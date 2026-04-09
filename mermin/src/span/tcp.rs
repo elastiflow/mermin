@@ -1,4 +1,3 @@
-use arrayvec::ArrayVec;
 use mermin_common::tcp::{
     TCP_FLAG_ACK, TCP_FLAG_CWR, TCP_FLAG_ECE, TCP_FLAG_FIN, TCP_FLAG_PSH, TCP_FLAG_RST,
     TCP_FLAG_SYN, TCP_FLAG_URG,
@@ -53,13 +52,25 @@ pub struct TcpFlags {
 }
 
 impl TcpFlags {
-    /// Convert a bit-flag byte to a stack-allocated array of active [`TcpFlag`] variants.
+    /// Convert a bit-flag byte into an iterator of active [`TcpFlag`] variants.
     /// Order: [FIN, SYN, RST, PSH, ACK, URG, ECE, CWR]
     ///
-    /// Returns an [`ArrayVec`] with capacity 8 (one per flag bit), avoiding heap allocation
-    /// since the maximum number of active flags is bounded by the bit-width of the input.
-    pub fn flags_from_bits(bits: u8) -> ArrayVec<TcpFlag, 8> {
-        Self::active_flags_from_array(&Self::bits_to_array(bits))
+    /// Returns a lazy iterator with no heap allocation. Callers that need a
+    /// collected value can call `.collect::<Vec<_>>()`.
+    pub fn flags_from_bits(bits: u8) -> impl Iterator<Item = TcpFlag> {
+        const FLAG_MAP: [(u8, TcpFlag); 8] = [
+            (TCP_FLAG_FIN, TcpFlag::Fin),
+            (TCP_FLAG_SYN, TcpFlag::Syn),
+            (TCP_FLAG_RST, TcpFlag::Rst),
+            (TCP_FLAG_PSH, TcpFlag::Psh),
+            (TCP_FLAG_ACK, TcpFlag::Ack),
+            (TCP_FLAG_URG, TcpFlag::Urg),
+            (TCP_FLAG_ECE, TcpFlag::Ece),
+            (TCP_FLAG_CWR, TcpFlag::Cwr),
+        ];
+        FLAG_MAP
+            .into_iter()
+            .filter_map(move |(mask, flag)| (bits & mask != 0).then_some(flag))
     }
 
     /// Latency between SYN and SYN+ACK timestamps (nanoseconds).
@@ -78,40 +89,6 @@ impl TcpFlags {
         }
         (sum / count as u64) as i64
     }
-
-    fn bits_to_array(bits: u8) -> [bool; 8] {
-        [
-            (bits & TCP_FLAG_FIN) != 0, // FIN
-            (bits & TCP_FLAG_SYN) != 0, // SYN
-            (bits & TCP_FLAG_RST) != 0, // RST
-            (bits & TCP_FLAG_PSH) != 0, // PSH
-            (bits & TCP_FLAG_ACK) != 0, // ACK
-            (bits & TCP_FLAG_URG) != 0, // URG
-            (bits & TCP_FLAG_ECE) != 0, // ECE
-            (bits & TCP_FLAG_CWR) != 0, // CWR
-        ]
-    }
-
-    fn active_flags_from_array(flags: &[bool; 8]) -> ArrayVec<TcpFlag, 8> {
-        const FLAG_ENUMS: [TcpFlag; 8] = [
-            TcpFlag::Fin,
-            TcpFlag::Syn,
-            TcpFlag::Rst,
-            TcpFlag::Psh,
-            TcpFlag::Ack,
-            TcpFlag::Urg,
-            TcpFlag::Ece,
-            TcpFlag::Cwr,
-        ];
-
-        let mut result = ArrayVec::new();
-        for (is_set, flag) in flags.iter().zip(FLAG_ENUMS.iter()) {
-            if *is_set {
-                result.push(*flag);
-            }
-        }
-        result
-    }
 }
 
 #[cfg(test)]
@@ -122,70 +99,70 @@ mod tests {
     fn test_tcp_flags_from_struct() {
         let tcp_flags = TCP_FLAG_SYN | TCP_FLAG_ACK;
 
-        let flags = TcpFlags::flags_from_bits(tcp_flags);
-        assert_eq!(flags.as_slice(), &[TcpFlag::Syn, TcpFlag::Ack]);
+        let flags = TcpFlags::flags_from_bits(tcp_flags).collect::<Vec<_>>();
+        assert_eq!(flags, [TcpFlag::Syn, TcpFlag::Ack]);
     }
 
     #[test]
     fn test_flags_from_bits() {
         // Test no flags
         assert_eq!(
-            TcpFlags::flags_from_bits(0x00).as_slice(),
-            &[] as &[TcpFlag]
+            TcpFlags::flags_from_bits(0x00).collect::<Vec<_>>(),
+            [] as [TcpFlag; 0]
         );
 
         // Test individual flags
         assert_eq!(
-            TcpFlags::flags_from_bits(TCP_FLAG_FIN).as_slice(),
-            &[TcpFlag::Fin]
+            TcpFlags::flags_from_bits(TCP_FLAG_FIN).collect::<Vec<_>>(),
+            [TcpFlag::Fin]
         );
         assert_eq!(
-            TcpFlags::flags_from_bits(TCP_FLAG_SYN).as_slice(),
-            &[TcpFlag::Syn]
+            TcpFlags::flags_from_bits(TCP_FLAG_SYN).collect::<Vec<_>>(),
+            [TcpFlag::Syn]
         );
         assert_eq!(
-            TcpFlags::flags_from_bits(TCP_FLAG_RST).as_slice(),
-            &[TcpFlag::Rst]
+            TcpFlags::flags_from_bits(TCP_FLAG_RST).collect::<Vec<_>>(),
+            [TcpFlag::Rst]
         );
         assert_eq!(
-            TcpFlags::flags_from_bits(TCP_FLAG_PSH).as_slice(),
-            &[TcpFlag::Psh]
+            TcpFlags::flags_from_bits(TCP_FLAG_PSH).collect::<Vec<_>>(),
+            [TcpFlag::Psh]
         );
         assert_eq!(
-            TcpFlags::flags_from_bits(TCP_FLAG_ACK).as_slice(),
-            &[TcpFlag::Ack]
+            TcpFlags::flags_from_bits(TCP_FLAG_ACK).collect::<Vec<_>>(),
+            [TcpFlag::Ack]
         );
         assert_eq!(
-            TcpFlags::flags_from_bits(TCP_FLAG_URG).as_slice(),
-            &[TcpFlag::Urg]
+            TcpFlags::flags_from_bits(TCP_FLAG_URG).collect::<Vec<_>>(),
+            [TcpFlag::Urg]
         );
         assert_eq!(
-            TcpFlags::flags_from_bits(TCP_FLAG_ECE).as_slice(),
-            &[TcpFlag::Ece]
+            TcpFlags::flags_from_bits(TCP_FLAG_ECE).collect::<Vec<_>>(),
+            [TcpFlag::Ece]
         );
         assert_eq!(
-            TcpFlags::flags_from_bits(TCP_FLAG_CWR).as_slice(),
-            &[TcpFlag::Cwr]
+            TcpFlags::flags_from_bits(TCP_FLAG_CWR).collect::<Vec<_>>(),
+            [TcpFlag::Cwr]
         );
 
         // Test common flag combinations
         assert_eq!(
-            TcpFlags::flags_from_bits(TCP_FLAG_SYN | TCP_FLAG_ACK).as_slice(), // SYN+ACK
-            &[TcpFlag::Syn, TcpFlag::Ack]
+            TcpFlags::flags_from_bits(TCP_FLAG_SYN | TCP_FLAG_ACK).collect::<Vec<_>>(), // SYN+ACK
+            [TcpFlag::Syn, TcpFlag::Ack]
         );
         assert_eq!(
-            TcpFlags::flags_from_bits(TCP_FLAG_FIN | TCP_FLAG_ACK).as_slice(), // FIN+ACK
-            &[TcpFlag::Fin, TcpFlag::Ack]
+            TcpFlags::flags_from_bits(TCP_FLAG_FIN | TCP_FLAG_ACK).collect::<Vec<_>>(), // FIN+ACK
+            [TcpFlag::Fin, TcpFlag::Ack]
         );
         assert_eq!(
-            TcpFlags::flags_from_bits(TCP_FLAG_PSH | TCP_FLAG_ACK).as_slice(), // PSH+ACK
-            &[TcpFlag::Psh, TcpFlag::Ack]
+            TcpFlags::flags_from_bits(TCP_FLAG_PSH | TCP_FLAG_ACK).collect::<Vec<_>>(), // PSH+ACK
+            [TcpFlag::Psh, TcpFlag::Ack]
         );
 
         // Test all flags
         assert_eq!(
-            TcpFlags::flags_from_bits(0xFF).as_slice(),
-            &[
+            TcpFlags::flags_from_bits(0xFF).collect::<Vec<_>>(),
+            [
                 TcpFlag::Fin,
                 TcpFlag::Syn,
                 TcpFlag::Rst,

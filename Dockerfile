@@ -50,7 +50,7 @@ RUN useradd --create-home --shell /bin/bash poseidon \
 RUN sed -i 's/sha1.second_preimage_resistance = 2026-02-01/sha1.second_preimage_resistance = 2026-04-01/' /usr/share/apt/default-sequoia.config
 # hadolint ignore=DL3059 # multi-stage build, more RUN -> better caching
 RUN wget -q https://apt.llvm.org/llvm.sh -O /tmp/llvm.sh && chmod +x /tmp/llvm.sh \
-    && /tmp/llvm.sh 20 all
+    && /tmp/llvm.sh 20
 
 # Install eBPF Dependencies
 # hadolint ignore=DL3059,DL3008 # multi-stage build, more RUN -> better caching, not pinning versions for now

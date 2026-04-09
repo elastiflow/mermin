@@ -3,9 +3,8 @@
 //! This module defines all Prometheus metrics used by Mermin and provides
 //! a centralized registry for metric collection.
 
-use std::sync::OnceLock;
+use std::sync::{LazyLock, OnceLock};
 
-use lazy_static::lazy_static;
 use prometheus::{
     Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGaugeVec, Opts, Registry,
 };
@@ -346,232 +345,399 @@ impl HistogramBucketConfig {
     }
 }
 
-lazy_static! {
-    /// Global Prometheus registry for all Mermin metrics (standard + debug).
-    pub static ref REGISTRY: Registry = Registry::new();
+/// Global Prometheus registry for all Mermin metrics (standard + debug).
+pub static REGISTRY: LazyLock<Registry> = LazyLock::new(Registry::new);
 
-    /// Registry for standard metrics only (no high-cardinality labels).
-    pub static ref STANDARD_REGISTRY: Registry = Registry::new();
+/// Registry for standard metrics only (no high-cardinality labels).
+pub static STANDARD_REGISTRY: LazyLock<Registry> = LazyLock::new(Registry::new);
 
-    /// Registry for debug metrics only (high-cardinality labels).
-    pub static ref DEBUG_REGISTRY: Registry = Registry::new();
+/// Registry for debug metrics only (high-cardinality labels).
+pub static DEBUG_REGISTRY: LazyLock<Registry> = LazyLock::new(Registry::new);
 
-    pub static ref EBPF_MAP_SIZE: IntGaugeVec = IntGaugeVec::new(
+pub static EBPF_MAP_SIZE: LazyLock<IntGaugeVec> = LazyLock::new(|| {
+    IntGaugeVec::new(
         Opts::new("map_size", "Current size of eBPF maps. For hash maps (FLOW_STATS, LISTENING_PORTS) this is the entry count. For ring buffers (FLOW_EVENTS) this is pending bytes (producer_pos - consumer_pos).")
             .namespace("mermin")
             .subsystem("ebpf"),
-        &["map", "unit"]
-    ).expect("failed to create ebpf_map_size metric");
+        &["map", "unit"],
+    )
+    .expect("failed to create ebpf_map_size metric")
+});
 
-    pub static ref EBPF_MAP_CAPACITY: IntGaugeVec = IntGaugeVec::new(
+pub static EBPF_MAP_CAPACITY: LazyLock<IntGaugeVec> = LazyLock::new(|| {
+    IntGaugeVec::new(
         Opts::new("map_capacity", "Maximum capacity of eBPF maps. For hash maps (FLOW_STATS, LISTENING_PORTS) this is max entries. For ring buffers (FLOW_EVENTS) this is size in bytes.")
             .namespace("mermin")
             .subsystem("ebpf"),
-        &["map", "unit"]
-    ).expect("failed to create ebpf_map_capacity metric");
+        &["map", "unit"],
+    )
+    .expect("failed to create ebpf_map_capacity metric")
+});
 
-    pub static ref EBPF_ATTACHMENT_MODE: IntGaugeVec = IntGaugeVec::new(
+pub static EBPF_ATTACHMENT_MODE: LazyLock<IntGaugeVec> = LazyLock::new(|| {
+    IntGaugeVec::new(
         Opts::new("method", "Current eBPF attachment method used (tc or tcx)")
             .namespace("mermin")
             .subsystem("ebpf"),
-        &["attachment"]
-    ).expect("failed to create ebpf_method metric");
+        &["attachment"],
+    )
+    .expect("failed to create ebpf_method metric")
+});
 
-    pub static ref BPF_FS_WRITABLE: prometheus::IntGauge = prometheus::IntGauge::with_opts(
-        Opts::new("bpf_fs_writable", "Whether /sys/fs/bpf is writable for TCX link pinning (1 = writable, 0 = not writable)")
-            .namespace("mermin")
-            .subsystem("ebpf")
-    ).expect("failed to create ebpf_bpf_fs_writable metric");
+pub static BPF_FS_WRITABLE: LazyLock<prometheus::IntGauge> = LazyLock::new(|| {
+    prometheus::IntGauge::with_opts(
+        Opts::new(
+            "bpf_fs_writable",
+            "Whether /sys/fs/bpf is writable for TCX link pinning (1 = writable, 0 = not writable)",
+        )
+        .namespace("mermin")
+        .subsystem("ebpf"),
+    )
+    .expect("failed to create ebpf_bpf_fs_writable metric")
+});
 
-    pub static ref EBPF_MAP_OPS_TOTAL: IntCounterVec = IntCounterVec::new(
+pub static EBPF_MAP_OPS_TOTAL: LazyLock<IntCounterVec> = LazyLock::new(|| {
+    IntCounterVec::new(
         Opts::new("map_ops_total", "Total number of eBPF map operations")
             .namespace("mermin")
             .subsystem("ebpf"),
-        &["map", "operation", "status"]
-    ).expect("failed to create ebpf_map_ops_total metric");
+        &["map", "operation", "status"],
+    )
+    .expect("failed to create ebpf_map_ops_total metric")
+});
 
-    pub static ref EBPF_ORPHANS_CLEANED_TOTAL: IntCounter = IntCounter::with_opts(
-        Opts::new("orphans_cleaned_total", "Total number of orphaned eBPF map entries cleaned up")
-            .namespace("mermin")
-            .subsystem("ebpf")
-    ).expect("failed to create ebpf_orphans_cleaned_total metric");
+pub static EBPF_ORPHANS_CLEANED_TOTAL: LazyLock<IntCounter> = LazyLock::new(|| {
+    IntCounter::with_opts(
+        Opts::new(
+            "orphans_cleaned_total",
+            "Total number of orphaned eBPF map entries cleaned up",
+        )
+        .namespace("mermin")
+        .subsystem("ebpf"),
+    )
+    .expect("failed to create ebpf_orphans_cleaned_total metric")
+});
 
-    pub static ref TC_PROGRAMS_TOTAL: IntCounterVec = IntCounterVec::new(
-        Opts::new("tc_programs_total", "Total number of TC programs attached or detached across all interfaces")
-            .namespace("mermin")
-            .subsystem("ebpf"),
-        &["operation"]  // operation: "attached" | "detached"
-    ).expect("failed to create ebpf_tc_programs_total metric");
+pub static TC_PROGRAMS_TOTAL: LazyLock<IntCounterVec> = LazyLock::new(|| {
+    IntCounterVec::new(
+        Opts::new(
+            "tc_programs_total",
+            "Total number of TC programs attached or detached across all interfaces",
+        )
+        .namespace("mermin")
+        .subsystem("ebpf"),
+        &["operation"], // operation: "attached" | "detached"
+    )
+    .expect("failed to create ebpf_tc_programs_total metric")
+});
 
-    pub static ref TC_PROGRAMS_ATTACHED_BY_INTERFACE_TOTAL: IntCounterVec = IntCounterVec::new(
-        Opts::new("tc_programs_attached_by_interface_total", "Total number of TC programs attached by interface and direction")
-            .namespace("mermin")
-            .subsystem("ebpf"),
-        &["interface", "direction"]
-    ).expect("failed to create ebpf_tc_programs_attached_by_interface_total metric");
+pub static TC_PROGRAMS_ATTACHED_BY_INTERFACE_TOTAL: LazyLock<IntCounterVec> = LazyLock::new(|| {
+    IntCounterVec::new(
+        Opts::new(
+            "tc_programs_attached_by_interface_total",
+            "Total number of TC programs attached by interface and direction",
+        )
+        .namespace("mermin")
+        .subsystem("ebpf"),
+        &["interface", "direction"],
+    )
+    .expect("failed to create ebpf_tc_programs_attached_by_interface_total metric")
+});
 
-    pub static ref TC_PROGRAMS_DETACHED_BY_INTERFACE_TOTAL: IntCounterVec = IntCounterVec::new(
-        Opts::new("tc_programs_detached_by_interface_total", "Total number of TC programs detached by interface and direction")
-            .namespace("mermin")
-            .subsystem("ebpf"),
-        &["interface", "direction"]
-    ).expect("failed to create ebpf_tc_programs_detached_by_interface_total metric");
+pub static TC_PROGRAMS_DETACHED_BY_INTERFACE_TOTAL: LazyLock<IntCounterVec> = LazyLock::new(|| {
+    IntCounterVec::new(
+        Opts::new(
+            "tc_programs_detached_by_interface_total",
+            "Total number of TC programs detached by interface and direction",
+        )
+        .namespace("mermin")
+        .subsystem("ebpf"),
+        &["interface", "direction"],
+    )
+    .expect("failed to create ebpf_tc_programs_detached_by_interface_total metric")
+});
 
-    pub static ref CHANNEL_CAPACITY: IntGaugeVec = IntGaugeVec::new(
+pub static CHANNEL_CAPACITY: LazyLock<IntGaugeVec> = LazyLock::new(|| {
+    IntGaugeVec::new(
         Opts::new("capacity", "Capacity of internal channels")
             .namespace("mermin")
             .subsystem("channel"),
-        &["channel"]  // packet_worker, exporter
-    ).expect("failed to create capacity metric");
+        &["channel"], // packet_worker, exporter
+    )
+    .expect("failed to create capacity metric")
+});
 
-    pub static ref CHANNEL_ENTRIES: IntGaugeVec = IntGaugeVec::new(
+pub static CHANNEL_ENTRIES: LazyLock<IntGaugeVec> = LazyLock::new(|| {
+    IntGaugeVec::new(
         Opts::new("entries", "Current number of items in channels")
             .namespace("mermin")
             .subsystem("channel"),
-        &["channel"]  // packet_worker, exporter
-    ).expect("failed to create entries metric");
+        &["channel"], // packet_worker, exporter
+    )
+    .expect("failed to create entries metric")
+});
 
-    pub static ref CHANNEL_SENDS_TOTAL: IntCounterVec = IntCounterVec::new(
-        Opts::new("sends_total", "Total number of send operations to internal channels")
-            .namespace("mermin")
-            .subsystem("channel"),
-        &["channel", "status"]  // channel: packet_worker, producer_output, decorator_output; status: success, error, backpressure
-    ).expect("failed to create sends_total metric");
+pub static CHANNEL_SENDS_TOTAL: LazyLock<IntCounterVec> = LazyLock::new(|| {
+    IntCounterVec::new(
+        Opts::new(
+            "sends_total",
+            "Total number of send operations to internal channels",
+        )
+        .namespace("mermin")
+        .subsystem("channel"),
+        &["channel", "status"], // channel: packet_worker, producer_output, decorator_output; status: success, error, backpressure
+    )
+    .expect("failed to create sends_total metric")
+});
 
-    pub static ref FLOW_SPANS_CREATED_TOTAL: IntCounter = IntCounter::with_opts(
-        Opts::new("spans_created_total", "Total number of flow spans created across all interfaces")
-            .namespace("mermin")
-            .subsystem("flow")
-    ).expect("failed to create flow_spans_created_total metric");
+pub static FLOW_SPANS_CREATED_TOTAL: LazyLock<IntCounter> = LazyLock::new(|| {
+    IntCounter::with_opts(
+        Opts::new(
+            "spans_created_total",
+            "Total number of flow spans created across all interfaces",
+        )
+        .namespace("mermin")
+        .subsystem("flow"),
+    )
+    .expect("failed to create flow_spans_created_total metric")
+});
 
-    pub static ref FLOW_SPANS_ACTIVE_TOTAL: prometheus::IntGauge = prometheus::IntGauge::with_opts(
-        Opts::new("spans_active_total", "Current number of active flow traces across all interfaces")
-            .namespace("mermin")
-            .subsystem("flow")
-    ).expect("failed to create flow_spans_active_total metric");
+pub static FLOW_SPANS_ACTIVE_TOTAL: LazyLock<prometheus::IntGauge> = LazyLock::new(|| {
+    prometheus::IntGauge::with_opts(
+        Opts::new(
+            "spans_active_total",
+            "Current number of active flow traces across all interfaces",
+        )
+        .namespace("mermin")
+        .subsystem("flow"),
+    )
+    .expect("failed to create flow_spans_active_total metric")
+});
 
-    pub static ref FLOW_SPAN_STORE_SIZE: IntGaugeVec = IntGaugeVec::new(
-        Opts::new("span_store_size", "Current number of flows in flow_store per poller")
-            .namespace("mermin")
-            .subsystem("flow"),
-        &["poller_id"]
-    ).expect("failed to create flow_span_store_size metric");
+pub static FLOW_SPAN_STORE_SIZE: LazyLock<IntGaugeVec> = LazyLock::new(|| {
+    IntGaugeVec::new(
+        Opts::new(
+            "span_store_size",
+            "Current number of flows in flow_store per poller",
+        )
+        .namespace("mermin")
+        .subsystem("flow"),
+        &["poller_id"],
+    )
+    .expect("failed to create flow_span_store_size metric")
+});
 
-    pub static ref FLOW_SPANS_PROCESSED_TOTAL: IntCounterVec = IntCounterVec::new(
-        Opts::new("spans_processed_total", "Total number of flow spans processed by FlowWorker per poller")
-            .namespace("mermin")
-            .subsystem("flow"),
-        &["poller_id"]
-    ).expect("failed to create flow_spans_processed_total metric");
+pub static FLOW_SPANS_PROCESSED_TOTAL: LazyLock<IntCounterVec> = LazyLock::new(|| {
+    IntCounterVec::new(
+        Opts::new(
+            "spans_processed_total",
+            "Total number of flow spans processed by FlowWorker per poller",
+        )
+        .namespace("mermin")
+        .subsystem("flow"),
+        &["poller_id"],
+    )
+    .expect("failed to create flow_spans_processed_total metric")
+});
 
-    pub static ref FLOW_EVENTS_TOTAL: IntCounterVec = IntCounterVec::new(
-        Opts::new("events_total", "Total number of flow events processed by ring buffer stage")
-            .namespace("mermin")
-            .subsystem("flow"),
-        &["status"] // status: "received" | "filtered" | "dropped_backpressure" | "dropped_error"
-    ).expect("failed to create flow_events_total metric");
+pub static FLOW_EVENTS_TOTAL: LazyLock<IntCounterVec> = LazyLock::new(|| {
+    IntCounterVec::new(
+        Opts::new(
+            "events_total",
+            "Total number of flow events processed by ring buffer stage",
+        )
+        .namespace("mermin")
+        .subsystem("flow"),
+        &["status"], // status: "received" | "filtered" | "dropped_backpressure" | "dropped_error"
+    )
+    .expect("failed to create flow_events_total metric")
+});
 
-    pub static ref FLOWS_CREATED_BY_INTERFACE_TOTAL: IntCounterVec = IntCounterVec::new(
-        Opts::new("spans_created_by_interface_total", "Total number of flow spans created by interface")
-            .namespace("mermin")
-            .subsystem("flow"),
-        &["interface"]
-    ).expect("failed to create flow_spans_created_by_interface_total metric");
+pub static FLOWS_CREATED_BY_INTERFACE_TOTAL: LazyLock<IntCounterVec> = LazyLock::new(|| {
+    IntCounterVec::new(
+        Opts::new(
+            "spans_created_by_interface_total",
+            "Total number of flow spans created by interface",
+        )
+        .namespace("mermin")
+        .subsystem("flow"),
+        &["interface"],
+    )
+    .expect("failed to create flow_spans_created_by_interface_total metric")
+});
 
-    pub static ref FLOWS_ACTIVE_BY_INTERFACE_TOTAL: IntGaugeVec = IntGaugeVec::new(
-        Opts::new("spans_active_by_interface_total", "Current number of active flow traces by interface")
-            .namespace("mermin")
-            .subsystem("flow"),
-        &["interface"]
-    ).expect("failed to create flow_spans_active_by_interface_total metric");
+pub static FLOWS_ACTIVE_BY_INTERFACE_TOTAL: LazyLock<IntGaugeVec> = LazyLock::new(|| {
+    IntGaugeVec::new(
+        Opts::new(
+            "spans_active_by_interface_total",
+            "Current number of active flow traces by interface",
+        )
+        .namespace("mermin")
+        .subsystem("flow"),
+        &["interface"],
+    )
+    .expect("failed to create flow_spans_active_by_interface_total metric")
+});
 
-    pub static ref PROCESSING_TOTAL: IntCounterVec = IntCounterVec::new(
+pub static PROCESSING_TOTAL: LazyLock<IntCounterVec> = LazyLock::new(|| {
+    IntCounterVec::new(
         Opts::new("processing_total", "Total number of flow spans processed by Flow Producer stage (aggregated across interfaces)")
             .namespace("mermin")
             .subsystem("flow"),
-        &["status"]
-    ).expect("failed to create processing_total metric");
+        &["status"],
+    )
+    .expect("failed to create processing_total metric")
+});
 
-    pub static ref FLOW_PRODUCER_QUEUE_SIZE: IntGaugeVec = IntGaugeVec::new(
-        Opts::new("queue_size", "Current number of flows queued for processing per poller")
+pub static FLOW_PRODUCER_QUEUE_SIZE: LazyLock<IntGaugeVec> = LazyLock::new(|| {
+    IntGaugeVec::new(
+        Opts::new(
+            "queue_size",
+            "Current number of flows queued for processing per poller",
+        )
+        .namespace("mermin")
+        .subsystem("producer"),
+        &["poller_id"],
+    )
+    .expect("failed to create flow_producer_queue_size metric")
+});
+
+pub static FLOW_PRODUCER_FLOW_SPANS_BY_INTERFACE_TOTAL: LazyLock<IntCounterVec> =
+    LazyLock::new(|| {
+        IntCounterVec::new(
+            Opts::new(
+                "spans_by_interface_total",
+                "Total number of flow spans processed by producer workers by interface",
+            )
             .namespace("mermin")
             .subsystem("producer"),
-        &["poller_id"]
-    ).expect("failed to create flow_producer_queue_size metric");
+            &["interface", "status"],
+        )
+        .expect("failed to create flow_producer_flow_spans_by_interface_total metric")
+    });
 
-    pub static ref FLOW_PRODUCER_FLOW_SPANS_BY_INTERFACE_TOTAL: IntCounterVec = IntCounterVec::new(
-        Opts::new("spans_by_interface_total", "Total number of flow spans processed by producer workers by interface")
-            .namespace("mermin")
-            .subsystem("producer"),
-        &["interface", "status"]
-    ).expect("failed to create flow_producer_flow_spans_by_interface_total metric");
+pub static EXPORT_FLOW_SPANS_TOTAL: LazyLock<IntCounterVec> = LazyLock::new(|| {
+    IntCounterVec::new(
+        Opts::new(
+            "flow_spans_total",
+            "Total number of flow spans exported to external systems",
+        )
+        .namespace("mermin")
+        .subsystem("export"),
+        &["exporter", "status"], // exporter: "otlp" | "stdout", status: "ok" | "attempted" | "error" | "noop"
+    )
+    .expect("failed to create export_flow_spans_total metric")
+});
 
-    pub static ref EXPORT_FLOW_SPANS_TOTAL: IntCounterVec = IntCounterVec::new(
-        Opts::new("flow_spans_total", "Total number of flow spans exported to external systems")
-            .namespace("mermin")
-            .subsystem("export"),
-        &["exporter", "status"] // exporter: "otlp" | "stdout", status: "ok" | "attempted" | "error" | "noop"
-    ).expect("failed to create export_flow_spans_total metric");
+pub static EXPORT_TIMEOUTS_TOTAL: LazyLock<IntCounter> = LazyLock::new(|| {
+    IntCounter::with_opts(
+        Opts::new(
+            "timeouts_total",
+            "Total number of export operations that timed out",
+        )
+        .namespace("mermin")
+        .subsystem("export"),
+    )
+    .expect("failed to create export_timeouts_total metric")
+});
 
-    pub static ref EXPORT_TIMEOUTS_TOTAL: IntCounter = IntCounter::with_opts(
-        Opts::new("timeouts_total", "Total number of export operations that timed out")
-            .namespace("mermin")
-            .subsystem("export")
-    ).expect("failed to create export_timeouts_total metric");
+pub static K8S_DECORATOR_FLOW_SPANS_TOTAL: LazyLock<IntCounterVec> = LazyLock::new(|| {
+    IntCounterVec::new(
+        Opts::new(
+            "flow_spans_total",
+            "Total number of flow spans processed by K8s decorator",
+        )
+        .namespace("mermin")
+        .subsystem("k8s_decorator"),
+        &["status"], // status: "dropped" | "ok" | "error" | "undecorated" | "excluded"
+    )
+    .expect("failed to create k8s_decorator_flow_spans_total metric")
+});
 
-    pub static ref K8S_DECORATOR_FLOW_SPANS_TOTAL: IntCounterVec = IntCounterVec::new(
-        Opts::new("flow_spans_total", "Total number of flow spans processed by K8s decorator")
-            .namespace("mermin")
-            .subsystem("k8s_decorator"),
-        &["status"] // status: "dropped" | "ok" | "error" | "undecorated" | "excluded"
-    ).expect("failed to create k8s_decorator_flow_spans_total metric");
+pub static K8S_WATCHER_EVENTS_TOTAL: LazyLock<IntCounterVec> = LazyLock::new(|| {
+    IntCounterVec::new(
+        Opts::new(
+            "events_total",
+            "Total number of K8s kind watcher events (aggregated across resources)",
+        )
+        .namespace("mermin")
+        .subsystem("k8s_watcher"),
+        &["kind", "event"], // apply, delete, init, init_done, error
+    )
+    .expect("failed to create k8s_watcher_events_total metric")
+});
 
-    pub static ref K8S_WATCHER_EVENTS_TOTAL: IntCounterVec = IntCounterVec::new(
-        Opts::new("events_total", "Total number of K8s kind watcher events (aggregated across resources)")
-            .namespace("mermin")
-            .subsystem("k8s_watcher"),
-        &["kind", "event"]  // apply, delete, init, init_done, error
-    ).expect("failed to create k8s_watcher_events_total metric");
+pub static SHUTDOWN_TIMEOUTS_TOTAL: LazyLock<IntCounter> = LazyLock::new(|| {
+    IntCounter::with_opts(
+        Opts::new(
+            "timeouts_total",
+            "Total number of shutdown operations that timed out",
+        )
+        .namespace("mermin")
+        .subsystem("shutdown"),
+    )
+    .expect("failed to create shutdown_timeouts metric")
+});
 
-    pub static ref SHUTDOWN_TIMEOUTS_TOTAL: IntCounter = IntCounter::with_opts(
-        Opts::new("timeouts_total", "Total number of shutdown operations that timed out")
-            .namespace("mermin")
-            .subsystem("shutdown")
-    ).expect("failed to create shutdown_timeouts metric");
-
-    pub static ref SHUTDOWN_FLOWS_TOTAL: IntCounterVec = IntCounterVec::new(
+pub static SHUTDOWN_FLOWS_TOTAL: LazyLock<IntCounterVec> = LazyLock::new(|| {
+    IntCounterVec::new(
         Opts::new("flows_total", "Total flow spans processed during shutdown")
             .namespace("mermin")
             .subsystem("shutdown"),
-        &["status"]  // preserved, lost
-    ).expect("failed to create shutdown_flows_total metric");
+        &["status"], // preserved, lost
+    )
+    .expect("failed to create shutdown_flows_total metric")
+});
 
-    pub static ref PACKETS_TOTAL: IntCounter = IntCounter::with_opts(
-        Opts::new("packets_total", "Total number of packets processed across all interfaces")
-            .namespace("mermin")
-            .subsystem("interface")
-    ).expect("failed to create packets_total metric");
+pub static PACKETS_TOTAL: LazyLock<IntCounter> = LazyLock::new(|| {
+    IntCounter::with_opts(
+        Opts::new(
+            "packets_total",
+            "Total number of packets processed across all interfaces",
+        )
+        .namespace("mermin")
+        .subsystem("interface"),
+    )
+    .expect("failed to create packets_total metric")
+});
 
-    pub static ref BYTES_TOTAL: IntCounter = IntCounter::with_opts(
-        Opts::new("bytes_total", "Total number of bytes processed across all interfaces")
-            .namespace("mermin")
-            .subsystem("interface")
-    ).expect("failed to create bytes_total metric");
+pub static BYTES_TOTAL: LazyLock<IntCounter> = LazyLock::new(|| {
+    IntCounter::with_opts(
+        Opts::new(
+            "bytes_total",
+            "Total number of bytes processed across all interfaces",
+        )
+        .namespace("mermin")
+        .subsystem("interface"),
+    )
+    .expect("failed to create bytes_total metric")
+});
 
-    pub static ref PACKETS_BY_INTERFACE_TOTAL: IntCounterVec = IntCounterVec::new(
-        Opts::new("packets_by_interface_total", "Total number of packets processed by interface and direction")
-            .namespace("mermin")
-            .subsystem("interface"),
-        &["interface", "direction"]  // direction: ingress/egress
-    ).expect("failed to create packets_by_interface_total metric");
+pub static PACKETS_BY_INTERFACE_TOTAL: LazyLock<IntCounterVec> = LazyLock::new(|| {
+    IntCounterVec::new(
+        Opts::new(
+            "packets_by_interface_total",
+            "Total number of packets processed by interface and direction",
+        )
+        .namespace("mermin")
+        .subsystem("interface"),
+        &["interface", "direction"], // direction: ingress/egress
+    )
+    .expect("failed to create packets_by_interface_total metric")
+});
 
-    pub static ref BYTES_BY_INTERFACE_TOTAL: IntCounterVec = IntCounterVec::new(
-        Opts::new("bytes_by_interface_total", "Total number of bytes processed by interface and direction")
-            .namespace("mermin")
-            .subsystem("interface"),
-        &["interface", "direction"]
-    ).expect("failed to create bytes_by_interface_total metric");
-}
+pub static BYTES_BY_INTERFACE_TOTAL: LazyLock<IntCounterVec> = LazyLock::new(|| {
+    IntCounterVec::new(
+        Opts::new(
+            "bytes_by_interface_total",
+            "Total number of bytes processed by interface and direction",
+        )
+        .namespace("mermin")
+        .subsystem("interface"),
+        &["interface", "direction"],
+    )
+    .expect("failed to create bytes_by_interface_total metric")
+});
 
 #[cfg(test)]
 mod tests {

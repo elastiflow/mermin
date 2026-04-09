@@ -1,24 +1,52 @@
-use std::fmt;
+use std::{error::Error, fmt};
 
-use thiserror::Error;
-
-#[derive(Debug, Error)]
+#[derive(Debug)]
 pub enum K8sError {
-    #[error("failed to initialize Kubernetes client: {0}")]
-    ClientInitialization(#[source] Box<kube::Error>),
-
-    #[error("failed to list {resource}: {source}")]
+    ClientInitialization(Box<kube::Error>),
     ResourceList {
         resource: String,
-        #[source]
         source: Box<kube::Error>,
     },
-
-    #[error("failed to create critical reflector for {resource}: {details}")]
-    CriticalReflectorFailure { resource: String, details: String },
-
-    #[error("failed to attribute flow with Kubernetes metadata: {0}")]
+    CriticalReflectorFailure {
+        resource: String,
+        details: String,
+    },
     Attribution(String),
+}
+
+impl fmt::Display for K8sError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ClientInitialization(e) => {
+                write!(f, "failed to initialize Kubernetes client: {e}")
+            }
+            Self::ResourceList { resource, source } => {
+                write!(f, "failed to list {resource}: {source}")
+            }
+            Self::CriticalReflectorFailure { resource, details } => {
+                write!(
+                    f,
+                    "failed to create critical reflector for {resource}: {details}"
+                )
+            }
+            Self::Attribution(msg) => {
+                write!(
+                    f,
+                    "failed to attribute flow with Kubernetes metadata: {msg}"
+                )
+            }
+        }
+    }
+}
+
+impl Error for K8sError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::ClientInitialization(e) => Some(e.as_ref()),
+            Self::ResourceList { source, .. } => Some(source.as_ref()),
+            Self::CriticalReflectorFailure { .. } | Self::Attribution(_) => None,
+        }
+    }
 }
 
 impl K8sError {

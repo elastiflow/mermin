@@ -21,8 +21,6 @@ use mermin_common::{
     },
     ip::{IpDscp, IpEcn, IpProto},
 };
-use num_iter::range_inclusive;
-use num_traits::PrimInt;
 use tracing::{error, warn};
 
 use crate::{
@@ -31,6 +29,38 @@ use crate::{
     runtime::conf::Conf,
     span::tcp::TcpFlags,
 };
+
+/// Private trait for integer types usable as numeric filter values.
+///
+/// Implemented for the specific widths used in filter dimensions:
+/// ports (`u16`), TTL/protocol numbers (`u8`), interface indices and flow labels (`u32`).
+trait NumericId: Copy + FromStr + std::hash::Hash + Eq + PartialOrd {
+    fn one() -> Self;
+    fn checked_add(self, rhs: Self) -> Option<Self>;
+}
+
+macro_rules! impl_numeric_id {
+    ($($t:ty),+) => {
+        $(impl NumericId for $t {
+            fn one() -> Self { 1 }
+            fn checked_add(self, rhs: Self) -> Option<Self> {
+                <$t>::checked_add(self, rhs)
+            }
+        })+
+    };
+}
+
+impl_numeric_id!(u8, u16, u32);
+
+fn range_inclusive<T: NumericId>(start: T, end: T) -> impl Iterator<Item = T> {
+    std::iter::successors(Some(start), move |&n| {
+        if n < end {
+            n.checked_add(T::one())
+        } else {
+            None
+        }
+    })
+}
 
 /// Helper macro to check if a packet/flow passes a filter rule.
 ///
@@ -81,7 +111,7 @@ impl CompiledRules {
 
         fn build_numeric_pair<T>(pair: &FilteringPair) -> CompiledRuleSet<HashSet<T>>
         where
-            T: PrimInt + FromStr + std::hash::Hash + Eq,
+            T: NumericId,
             <T as FromStr>::Err: std::fmt::Debug,
         {
             CompiledRuleSet {
@@ -186,7 +216,7 @@ fn build_ip_network_table(list: &[String]) -> IpNetworkTable<()> {
 /// with `-` (e.g. `"8000-8002"` expands to `{8000, 8001, 8002}`).
 fn build_numeric_set<T>(list: &[String]) -> HashSet<T>
 where
-    T: PrimInt + FromStr + std::hash::Hash + Eq,
+    T: NumericId,
     <T as FromStr>::Err: std::fmt::Debug,
 {
     let mut set = HashSet::new();
