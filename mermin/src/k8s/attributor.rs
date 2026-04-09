@@ -235,25 +235,54 @@ pub struct K8sObjectMeta {
     pub annotations: Option<HashMap<String, String>>,
 }
 
+impl K8sObjectMeta {
+    pub fn from_resource<T>(resource: &T, extract_fn: impl Fn(&str, &str) -> bool) -> Self
+    where
+        T: Resource<DynamicType = ()>,
+    {
+        let kind = T::kind(&()).to_string();
+        let kind_lower = kind.to_lowercase();
+
+        let name = resource.name_any();
+        let namespace = resource.namespace();
+        let uid = if extract_fn(&kind_lower, "uid") {
+            resource.uid()
+        } else {
+            None
+        };
+
+        let labels = if extract_fn(&kind_lower, "labels") && !resource.labels().is_empty() {
+            Some(resource.labels().clone().into_iter().collect())
+        } else {
+            None
+        };
+
+        let annotations =
+            if extract_fn(&kind_lower, "annotations") && !resource.annotations().is_empty() {
+                Some(resource.annotations().clone().into_iter().collect())
+            } else {
+                None
+            };
+
+        Self {
+            kind,
+            kind_lower,
+            name,
+            uid,
+            namespace,
+            labels,
+            annotations,
+        }
+    }
+}
+
 /// Generic implementation to convert any Kubernetes Resource into our K8sObjectMeta.
 impl<T> From<&T> for K8sObjectMeta
 where
     T: Resource<DynamicType = ()>,
 {
     fn from(resource: &T) -> Self {
-        let kind = T::kind(&()).to_string();
-        let kind_lower = kind.to_lowercase();
-        Self {
-            kind,
-            kind_lower,
-            name: resource.name_any(),
-            uid: resource.uid(),
-            namespace: resource.namespace(),
-            labels: (!resource.labels().is_empty())
-                .then(|| resource.labels().clone().into_iter().collect()),
-            annotations: (!resource.annotations().is_empty())
-                .then(|| resource.annotations().clone().into_iter().collect()),
-        }
+        Self::from_resource(resource, |_, _| true)
     }
 }
 
@@ -767,21 +796,29 @@ impl Attributor {
     /// the owner_relations configuration.
     ///
     /// Walks the chain up to max_depth and filters based on include/exclude rules.
-    pub fn get_owners(&self, pod: &Pod) -> Option<Vec<WorkloadOwner>> {
+    pub fn get_owners(
+        &self,
+        pod: &Pod,
+        extract_fn: impl Fn(&str, &str) -> bool,
+    ) -> Option<Vec<WorkloadOwner>> {
         self.owner_relations_manager
-            .get_owners(pod, &self.resource_store)
+            .get_owners(pod, &self.resource_store, extract_fn)
     }
 
     /// Given a Pod object, returns metadata for all resources that have selectors matching
     /// the pod's labels (e.g., NetworkPolicies, Services).
     ///
     /// Returns None if selector_relations is not configured or no matches are found.
-    pub fn get_selector_based_metadata(&self, pod: &Pod) -> Option<Vec<K8sObjectMeta>> {
+    pub fn get_selector_based_metadata(
+        &self,
+        pod: &Pod,
+        extract_fn: impl Fn(&str, &str) -> bool,
+    ) -> Option<Vec<K8sObjectMeta>> {
         let manager = self.selector_relations_manager.as_ref()?;
         let pod_labels = pod.labels();
         let pod_namespace = pod.namespace().unwrap_or_default();
 
-        manager.get_related_resources(pod_labels, &pod_namespace, &self.resource_store)
+        manager.get_related_resources(pod_labels, &pod_namespace, &self.resource_store, extract_fn)
     }
 
     /// Shared IP lookup implementation used by filtered and unfiltered callers.
@@ -2002,7 +2039,7 @@ mod tests {
         // Instead, we'll manually construct the parts we need and test them directly
 
         // Test Owner Relations
-        let owners = owner_relations_manager.get_owners(&pod, &resource_store);
+        let owners = owner_relations_manager.get_owners(&pod, &resource_store, |_, _| true);
         assert!(owners.is_some(), "Owner relations should return results");
         let owners = owners.unwrap();
 
@@ -2037,8 +2074,12 @@ mod tests {
         let pod_labels = pod.labels();
         let pod_namespace = pod.namespace().unwrap_or_default();
 
-        let selector_matches =
-            selector_manager.get_related_resources(pod_labels, &pod_namespace, &resource_store);
+        let selector_matches = selector_manager.get_related_resources(
+            pod_labels,
+            &pod_namespace,
+            &resource_store,
+            |_, _| true,
+        );
 
         assert!(
             selector_matches.is_some(),
