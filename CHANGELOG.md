@@ -1,3 +1,13 @@
+## [v0.3.8] - 2026-04-10
+
+### Bug Fixes
+
+- **ci:** Workaround build timeout (#567)
+
+[v0.3.7..v0.3.8](https://github.com/elastiflow/mermin/compare/v0.3.7...v0.3.8)
+
+
+
 ## [v0.3.7] - 2026-04-10
 
 ### Bug Fixes
