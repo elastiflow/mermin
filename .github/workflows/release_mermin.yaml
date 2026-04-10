@@ -139,6 +139,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      artifact-metadata: write
       attestations: write
       id-token: write
     strategy:
