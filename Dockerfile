@@ -113,7 +113,7 @@ RUN cargo build --release
 # ---- Runtime Stage ----
 # Use a distroless base image for the final container without shell support
 # hadolint ignore=DL3006 # gcr.io/distroless/cc-debian12 don't have tags
-FROM gcr.io/distroless/cc-debian13@sha256:e1cc90d06703f5dc30ae869fbfce78fce688f21a97efecd226375233a882e62f AS runner
+FROM gcr.io/distroless/cc-debian13@sha256:56aaf20ab2523a346a67c8e8f8e8dabe447447d0788b82284d14ad79cd5f93cc AS runner
 ARG APP_ROOT APP
 
 COPY --from=builder ${APP_ROOT}/target/release/${APP} /usr/bin/${APP}
