@@ -1,3 +1,13 @@
+## [v0.3.9] - 2026-04-10
+
+### Bug Fixes
+
+- **ci:** Increase TTL for the GCP AR token (#569)
+
+[v0.3.8..v0.3.9](https://github.com/elastiflow/mermin/compare/v0.3.8...v0.3.9)
+
+
+
 ## [v0.3.8] - 2026-04-10
 
 ### Bug Fixes
