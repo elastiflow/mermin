@@ -170,14 +170,6 @@ jobs:
           registry: us-docker.pkg.dev
           username: oauth2accesstoken
           password: ${{ steps.gcr_auth.outputs.access_token }}
-      - name: Hack dependency caching
-        run: |
-          cp mermin/Cargo.toml mermin/Cargo.toml.orig
-          cp Cargo.lock Cargo.lock.orig
-          sed -i 's/^version = ".*"/version = "0.0.1"/' mermin/Cargo.toml
-          cat Cargo.lock.orig | tr '\n' '\r' \
-            | sed 's/name = "mermin"\rversion = "[0-9]\{,999\}\.[0-9]\{,999\}\.[0-9]\{,999\}"\r/name = "mermin"\rversion = "0.0.1"\r/' \
-            | tr '\r' '\n'  > Cargo.lock
       - name: Build docker image
         uses: elastiflow/gha-reusable/actions/docker-build-push@v0
         with:
