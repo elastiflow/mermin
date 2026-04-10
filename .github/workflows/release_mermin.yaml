@@ -162,7 +162,7 @@ jobs:
           project_id: "pub-artifacts-j8rjbu"
           workload_identity_provider: "projects/701687754822/locations/global/workloadIdentityPools/github-actions/providers/github-actions"
           service_account: "gha-registry-writer@pub-artifacts-j8rjbu.iam.gserviceaccount.com"
-          access_token_lifetime: 5400s
+          access_token_lifetime: 7200s
       - name: Login to GCR
         uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
         with:
