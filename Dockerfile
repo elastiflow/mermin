@@ -98,8 +98,10 @@ WORKDIR ${APP_ROOT}
 
 # Build dependencies (hack, https://github.com/rust-lang/cargo/issues/2644#issuecomment-2335499312)
 # Cleanup everything related Mermin code in "./target" afterwards
-COPY --parents **/Cargo.lock **/Cargo.toml ./
 COPY --parents **/rust-toolchain.toml **/rustfmt.toml ./
+## Download cargo components
+RUN cargo --version
+COPY --parents **/Cargo.lock **/Cargo.toml ./
 RUN find . -type d | while read -r i; do mkdir -p "$i/src"; echo 'fn main() {}' > "$i/src/main.rs"; echo '// dummy line' > "$i/src/lib.rs"; done \
   && cargo build --release \
   && find . -type d -name 'src' -not -path './target/*' -prune -exec rm -rf {} \; \
@@ -107,6 +109,9 @@ RUN find . -type d | while read -r i; do mkdir -p "$i/src"; echo 'fn main() {}' 
 
 # Copy source code (heavily relies on .dockerignore)
 COPY . .
+# Restore original Cargo.toml/lock after the hack in the CI workflow
+RUN mv mermin/Cargo.toml.orig mermin/Cargo.toml || true \
+  && mv Cargo.lock.orig Cargo.lock || true
 # Build the final application, leveraging the cached dependencies
 RUN cargo build --release
 
