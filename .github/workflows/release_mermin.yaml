@@ -135,7 +135,7 @@ jobs:
     needs: [release]
     if: ${{ fromJson(needs.release.outputs.new_release_published) }}
     runs-on: ubuntu-latest-8c
-    timeout-minutes: 90
+    timeout-minutes: 120
     permissions:
       contents: read
       packages: write
