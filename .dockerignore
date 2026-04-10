@@ -3,6 +3,8 @@
 # misc
 !Cargo.lock
 !Cargo.toml
+!Cargo.lock.orig
+!Cargo.toml.orig
 !rust-toolchain.toml
 !rustfmt.toml
 
