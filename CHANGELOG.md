@@ -1,3 +1,13 @@
+## [v0.3.7] - 2026-04-10
+
+### Bug Fixes
+
+- **deps:** Update gcr.io/distroless/cc-debian13 docker digest to 56aaf20 (#565)
+
+[v0.3.6..v0.3.7](https://github.com/elastiflow/mermin/compare/v0.3.6...v0.3.7)
+
+
+
 ## [v0.3.6] - 2026-04-07
 
 ### Bug Fixes
