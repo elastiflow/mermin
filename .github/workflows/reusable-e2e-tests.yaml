@@ -48,7 +48,7 @@ jobs:
         run: |
           cp mermin/Cargo.toml mermin/Cargo.toml.orig
           cp Cargo.lock Cargo.lock.orig
-          sed -i 's/^version = ".*"/version = "0.0.1"/' mermin/Cargo.toml | head -n 5 mermin/Cargo.toml
+          sed -i 's/^version = ".*"/version = "0.0.1"/' mermin/Cargo.toml
           cat Cargo.lock.orig | tr '\n' '\r' \
             | sed 's/name = "mermin"\rversion = "[0-9]\{,999\}\.[0-9]\{,999\}\.[0-9]\{,999\}"\r/name = "mermin"\rversion = "0.0.1"\r/' \
             | tr '\r' '\n'  > Cargo.lock
