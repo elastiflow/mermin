@@ -25,7 +25,7 @@
 //! metrics::registry::FLOWS_CREATED.with_label_values(&["eth0"]).inc();
 //! ```
 
-use std::io;
+use std::{error::Error, fmt, io};
 
 use axum::{
     Router,
@@ -34,27 +34,51 @@ use axum::{
     routing::get,
 };
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
 use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
 use tracing::{error, info};
 
 use crate::metrics::{self, ebpf::update_ringbuf_size_metric, opts::MetricsOptions};
 
-#[derive(Debug, Error)]
+#[derive(Debug)]
 pub enum MetricsError {
-    #[error("failed to bind metrics server to {address}: {source}")]
-    BindAddress {
-        address: String,
-        #[source]
-        source: io::Error,
-    },
+    BindAddress { address: String, source: io::Error },
+    ServeError(io::Error),
+    PrometheusError(prometheus::Error),
+}
 
-    #[error("metrics server error: {0}")]
-    ServeError(#[from] io::Error),
+impl fmt::Display for MetricsError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::BindAddress { address, source } => {
+                write!(f, "failed to bind metrics server to {address}: {source}")
+            }
+            Self::ServeError(e) => write!(f, "metrics server error: {e}"),
+            Self::PrometheusError(e) => write!(f, "prometheus registry error: {e}"),
+        }
+    }
+}
 
-    #[error("prometheus registry error: {0}")]
-    PrometheusError(#[from] prometheus::Error),
+impl Error for MetricsError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::BindAddress { source, .. } => Some(source),
+            Self::ServeError(e) => Some(e),
+            Self::PrometheusError(e) => Some(e),
+        }
+    }
+}
+
+impl From<io::Error> for MetricsError {
+    fn from(e: io::Error) -> Self {
+        Self::ServeError(e)
+    }
+}
+
+impl From<prometheus::Error> for MetricsError {
+    fn from(e: prometheus::Error) -> Self {
+        Self::PrometheusError(e)
+    }
 }
 
 impl MetricsError {

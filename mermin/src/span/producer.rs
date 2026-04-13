@@ -976,17 +976,11 @@ impl FlowWorker {
                 flow_reverse_ip_flow_label: is_ipv6.then_some(stats.reverse_ip_flow_label),
 
                 flow_tcp_flags_bits: is_tcp.then_some(stats.tcp_flags),
-                flow_tcp_flags_tags: is_tcp.then(|| {
-                    TcpFlags::flags_from_bits(stats.tcp_flags)
-                        .into_iter()
-                        .collect()
-                }),
+                flow_tcp_flags_tags: is_tcp
+                    .then(|| TcpFlags::flags_from_bits(stats.tcp_flags).collect()),
                 flow_reverse_tcp_flags_bits: is_tcp.then_some(stats.reverse_tcp_flags),
-                flow_reverse_tcp_flags_tags: is_tcp.then(|| {
-                    TcpFlags::flags_from_bits(stats.reverse_tcp_flags)
-                        .into_iter()
-                        .collect()
-                }),
+                flow_reverse_tcp_flags_tags: is_tcp
+                    .then(|| TcpFlags::flags_from_bits(stats.reverse_tcp_flags).collect()),
                 flow_tcp_handshake_latency: (is_tcp
                     && stats.tcp_syn_ns != 0
                     && stats.tcp_syn_ack_ns != 0)

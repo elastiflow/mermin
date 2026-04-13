@@ -6,8 +6,8 @@ use std::{
     time::Duration,
 };
 
-use log::info;
 use socket2::{Domain, Socket, Type};
+use tracing::info;
 
 const IPV4_HOST: &str = "192.168.100.1";
 const IPV4_NS: &str = "192.168.100.2";

@@ -1,18 +1,43 @@
-use thiserror::Error;
+use std::{error::Error, fmt};
 
-#[derive(Debug, Error)]
+#[derive(Debug)]
 pub enum OtlpError {
-    #[error("failed to create OTLP exporter: {0}")]
     ExporterConfiguration(String),
-
-    #[error("invalid exporter endpoint '{endpoint}': {details}")]
     InvalidEndpoint { endpoint: String, details: String },
-
-    #[error("TLS configuration error: {0}")]
     TlsConfiguration(String),
+    TonicTransport(tonic::transport::Error),
+}
 
-    #[error("tonic transport error: {0}")]
-    TonicTransport(#[from] tonic::transport::Error),
+impl fmt::Display for OtlpError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ExporterConfiguration(msg) => {
+                write!(f, "failed to create OTLP exporter: {msg}")
+            }
+            Self::InvalidEndpoint { endpoint, details } => {
+                write!(f, "invalid exporter endpoint '{endpoint}': {details}")
+            }
+            Self::TlsConfiguration(msg) => write!(f, "TLS configuration error: {msg}"),
+            Self::TonicTransport(e) => write!(f, "tonic transport error: {e}"),
+        }
+    }
+}
+
+impl Error for OtlpError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::TonicTransport(e) => Some(e),
+            Self::ExporterConfiguration(_)
+            | Self::InvalidEndpoint { .. }
+            | Self::TlsConfiguration(_) => None,
+        }
+    }
+}
+
+impl From<tonic::transport::Error> for OtlpError {
+    fn from(e: tonic::transport::Error) -> Self {
+        Self::TonicTransport(e)
+    }
 }
 
 impl OtlpError {

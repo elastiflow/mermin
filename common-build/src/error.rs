@@ -1,33 +1,55 @@
-use std::path::PathBuf;
-
-use thiserror::Error;
+use std::{error::Error, fmt, path::PathBuf};
 
 /// Errors that can occur during build operations
-#[derive(Debug, Error)]
+#[derive(Debug)]
 pub enum BuildError {
-    /// Failed to read toolchain file
-    #[error("failed to read toolchain file at {path}: {source}")]
+    /// Failed to read toolchain file.
     ToolchainFileRead {
         path: PathBuf,
-        #[source]
         source: std::io::Error,
     },
-
-    /// Failed to parse toolchain file
-    #[error("failed to parse toolchain file: {0}")]
+    /// Failed to parse toolchain file.
     ToolchainFileParse(String),
-
-    /// Missing required field in toolchain file
-    #[error("missing required field '{field}' in toolchain file")]
+    /// Missing required field in toolchain file.
     MissingToolchainField { field: String },
-
-    /// Invalid toolchain channel value
-    #[error("invalid toolchain channel value: {0}")]
+    /// Invalid toolchain channel value.
     InvalidToolchainChannel(String),
+    /// TOML deserialization error.
+    TomlParse(toml::de::Error),
+}
 
-    /// TOML parsing error
-    #[error("TOML parsing error: {0}")]
-    TomlParse(#[from] toml::de::Error),
+impl fmt::Display for BuildError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ToolchainFileRead { path, .. } => {
+                write!(f, "failed to read toolchain file at {}", path.display())
+            }
+            Self::ToolchainFileParse(msg) => write!(f, "failed to parse toolchain file: {msg}"),
+            Self::MissingToolchainField { field } => {
+                write!(f, "missing required field '{field}' in toolchain file")
+            }
+            Self::InvalidToolchainChannel(val) => {
+                write!(f, "invalid toolchain channel value: {val}")
+            }
+            Self::TomlParse(err) => write!(f, "TOML parsing error: {err}"),
+        }
+    }
+}
+
+impl Error for BuildError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::ToolchainFileRead { source, .. } => Some(source),
+            Self::TomlParse(err) => Some(err),
+            _ => None,
+        }
+    }
+}
+
+impl From<toml::de::Error> for BuildError {
+    fn from(err: toml::de::Error) -> Self {
+        Self::TomlParse(err)
+    }
 }
 
 impl BuildError {

@@ -1,38 +1,50 @@
-use thiserror::Error;
+use std::{error::Error, fmt};
 
-/// Errors that can occur during health check operations
-#[derive(Debug, Error)]
+#[derive(Debug)]
 pub enum HealthError {
-    /// Failed to bind API server to address
-    #[error("failed to bind API server to {address}: {source}")]
     BindAddress {
         address: String,
-        #[source]
         source: std::io::Error,
     },
-
-    /// Failed to start API server
-    #[error("failed to start API server: {0}")]
     #[allow(dead_code)]
-    ServerStart(#[source] std::io::Error),
-
-    /// Failed to serve requests
-    #[error("failed to serve requests: {0}")]
-    ServeError(#[source] std::io::Error),
-
-    /// Health check state inconsistent
-    #[error("health check state is inconsistent: {0}")]
+    ServerStart(std::io::Error),
+    ServeError(std::io::Error),
     #[allow(dead_code)]
     InconsistentState(String),
-
-    /// Router configuration error
-    #[error("failed to configure health router: {0}")]
     #[allow(dead_code)]
     RouterConfiguration(String),
 }
 
+impl fmt::Display for HealthError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::BindAddress { address, source } => {
+                write!(f, "failed to bind API server to {address}: {source}")
+            }
+            Self::ServerStart(e) => write!(f, "failed to start API server: {e}"),
+            Self::ServeError(e) => write!(f, "failed to serve requests: {e}"),
+            Self::InconsistentState(msg) => {
+                write!(f, "health check state is inconsistent: {msg}")
+            }
+            Self::RouterConfiguration(msg) => {
+                write!(f, "failed to configure health router: {msg}")
+            }
+        }
+    }
+}
+
+impl Error for HealthError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::BindAddress { source, .. } => Some(source),
+            Self::ServerStart(e) => Some(e),
+            Self::ServeError(e) => Some(e),
+            Self::InconsistentState(_) | Self::RouterConfiguration(_) => None,
+        }
+    }
+}
+
 impl HealthError {
-    /// Create a bind address error
     pub fn bind_address(address: impl Into<String>, source: std::io::Error) -> Self {
         Self::BindAddress {
             address: address.into(),
