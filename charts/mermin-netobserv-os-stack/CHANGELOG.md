@@ -1,3 +1,13 @@
+## [mermin-netobserv-os-stack-0.3.3] - 2026-04-13
+
+### Bug Fixes
+
+- **deps:** Update helm (#564)
+
+[mermin-netobserv-os-stack-0.3.2..mermin-netobserv-os-stack-0.3.3](https://github.com/elastiflow/mermin/compare/mermin-netobserv-os-stack-0.3.2...mermin-netobserv-os-stack-0.3.3)
+
+
+
 ## [mermin-netobserv-os-stack-0.3.2] - 2026-04-07
 
 ### Bug Fixes
