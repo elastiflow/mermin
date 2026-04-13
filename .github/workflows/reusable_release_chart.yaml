@@ -93,7 +93,7 @@ jobs:
           bump_version_yaml_key: "${{ inputs.chart_yaml_version_keys }}"
       - name: Create Pull Request
         if: ${{ fromJson(steps.prepare_release.outputs.new_release_published) }}
-        uses: peter-evans/create-pull-request@c0f553fe549906ede9cf27b5156039d195d2ece0 # v8.1.0
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           base: "${{ github.ref_name }}"
@@ -152,7 +152,7 @@ jobs:
           cr package ${CHARTS_DIR}
       - name: Create GH release
         if: ${{ fromJson(steps.prepare_release.outputs.new_release_published) }}
-        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           name: ${{ steps.prepare_release.outputs.new_release_git_tag }}
           tag_name: ${{ steps.prepare_release.outputs.new_release_git_tag }}
