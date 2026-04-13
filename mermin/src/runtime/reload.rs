@@ -166,8 +166,7 @@ impl ConfigWatcher {
                     continue; // timeout — loop back and check stop flag
                 }
                 if ret < 0 {
-                    let os_errno =
-                        std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+                    let os_errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
                     if os_errno == libc::EINTR {
                         continue; // interrupted by a signal, retry
                     }
