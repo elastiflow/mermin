@@ -6,6 +6,22 @@ ARG APP=mermin
 
 
 # ---- Build Stage ----
+FROM debian:13.4-slim@sha256:4ffb3a1511099754cddc70eb1b12e50ffdb67619aa0ab6c13fcd800a78ef7c7a AS dependency-hack
+ARG APP_ROOT
+
+WORKDIR ${APP_ROOT}
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+COPY --parents **/Cargo.lock **/Cargo.toml ./
+
+# Changes mermin version in both mermin/Cargo.toml and Cargo.lock to 0.0.1 to prevent dependency cache invalidation
+RUN cp mermin/Cargo.toml mermin/Cargo.toml.orig \
+  && cp Cargo.lock Cargo.lock.orig \
+  && sed -i 's/^version = ".*"/version = "0.0.1"/' mermin/Cargo.toml \
+  && cat Cargo.lock.orig | tr '\n' '\r' \
+    | sed 's/name = "mermin"\rversion = "[0-9]\{,999\}\.[0-9]\{,999\}\.[0-9]\{,999\}"\r/name = "mermin"\rversion = "0.0.1"\r/' \
+    | tr '\r' '\n' > Cargo.lock
+
+# ---- Build Stage ----
 FROM rust:1.88.0-trixie@sha256:9a7159329166b45f453351a077367f501aa3e98378f7e327530e7966a139d05f AS base
 
 # Since Mermin needs root to be ran, switching to non-root in in the base/builder stages does not improve the security.
@@ -98,8 +114,12 @@ WORKDIR ${APP_ROOT}
 
 # Build dependencies (hack, https://github.com/rust-lang/cargo/issues/2644#issuecomment-2335499312)
 # Cleanup everything related Mermin code in "./target" afterwards
-COPY --parents **/Cargo.lock **/Cargo.toml ./
 COPY --parents **/rust-toolchain.toml **/rustfmt.toml ./
+## Download cargo components
+RUN cargo --version
+COPY --from=dependency-hack --parents ${APP_ROOT}/**/Cargo.lock ${APP_ROOT}/**/Cargo.toml ./
+# --parents copies everything to the ${APP_ROOT}${APP_ROOT} ("/app/app") subdir
+RUN mv ${APP_ROOT}${APP_ROOT}/* ./ && rm -rf ${APP_ROOT}${APP_ROOT}
 RUN find . -type d | while read -r i; do mkdir -p "$i/src"; echo 'fn main() {}' > "$i/src/main.rs"; echo '// dummy line' > "$i/src/lib.rs"; done \
   && cargo build --release \
   && find . -type d -name 'src' -not -path './target/*' -prune -exec rm -rf {} \; \
