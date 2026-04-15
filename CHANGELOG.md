@@ -1,3 +1,15 @@
+## [v0.3.10] - 2026-04-15
+
+### Bug Fixes
+
+- **deps:** Update github actions (#573)
+- Remove deps that do not bring much value (#571)
+- **ci:** Hack Rust dependencies caching in image layers (#572)
+
+[v0.3.9..v0.3.10](https://github.com/elastiflow/mermin/compare/v0.3.9...v0.3.10)
+
+
+
 ## [v0.3.9] - 2026-04-10
 
 ### Bug Fixes
