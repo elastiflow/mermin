@@ -114,7 +114,7 @@ jobs:
           exclude_paths: "docs/**/*,charts/mermin-netobserv-os-stack/**/*,charts/traffic-gen/**/*"
       - name: Create GH release
         if: ${{ fromJson(steps.prepare_release.outputs.new_release_published) }}
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
           name: ${{ steps.prepare_release.outputs.new_release_git_tag }}
           tag_name: ${{ steps.prepare_release.outputs.new_release_git_tag }}
@@ -232,7 +232,7 @@ jobs:
           cr package ${{ env.CHARTS_DIR }}
       - name: Create GH release
         if: ${{ fromJson(needs.release.outputs.new_release_published) }}
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
           name: mermin-${{ needs.release.outputs.new_release_version }}
           tag_name: mermin-${{ needs.release.outputs.new_release_version }}
