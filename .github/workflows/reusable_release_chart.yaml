@@ -164,7 +164,7 @@ jobs:
           files: ".cr-release-packages/${{ inputs.chart_name }}*.tgz"
       - name: Update GH pages index
         env:
-          REPO_OWNER: ${{ inputs.repository_name }}
+          REPO_OWNER: ${{ github.repository_owner }}
           REPO_NAME: ${{ inputs.repository_name }}
           REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
