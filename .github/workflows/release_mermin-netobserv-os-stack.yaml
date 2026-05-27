@@ -32,8 +32,11 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: set outputs with default values
         id: set_standard_vars
+        env:
+          TAG_PREFIX: ${{ fromJson(env.BRANCH_TAG_PREFIXES)[github.ref_name] }}
         run: |
-          echo "tag_prefix=${{ fromJson(env.BRANCH_TAG_PREFIXES)[github.ref_name] }}" >> $GITHUB_OUTPUT
+          echo "tag_prefix=${TAG_PREFIX}"
+          echo "tag_prefix=${TAG_PREFIX}" >> $GITHUB_OUTPUT
 
   release:
     name: Release mermin-netobserv-os-stack
