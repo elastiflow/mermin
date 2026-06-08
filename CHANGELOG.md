@@ -1,3 +1,19 @@
+## [v0.4.0] - 2026-06-08
+
+### Bug Fixes
+
+- **ci:** Wrong  in Chart Release (#577)
+- **deps:** Update pre-commit hook semgrep/pre-commit to v1.159.0 (#581)
+- **deps:** Update softprops/action-gh-release action to v3 (#582)
+- **deps:** Update github actions (#580)
+### Features
+
+- Bump the toolchain to  (#584)
+
+[v0.3.10..v0.4.0](https://github.com/elastiflow/mermin/compare/v0.3.10...v0.4.0)
+
+
+
 ## [v0.3.10] - 2026-04-15
 
 ### Bug Fixes
