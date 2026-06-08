@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.23-labs@sha256:7eca9451d94f9b8ad22e44988b92d595d3e4d65163794237949a8c3413fbed5d
+# syntax=docker/dockerfile:1.24-labs@sha256:7d49dad25a050e14338ba7028b0460243f9d911dedc160a8fe20c34738fef3af
 # nosemgrep: dockerfile.security.last-user-is-root.last-user-is-root
 # Using "labs" due to "COPY --parents", https://docs.docker.com/reference/dockerfile/#copy---parents
 ARG APP_ROOT=/app
@@ -6,7 +6,7 @@ ARG APP=mermin
 
 
 # ---- Build Stage ----
-FROM debian:13.4-slim@sha256:4ffb3a1511099754cddc70eb1b12e50ffdb67619aa0ab6c13fcd800a78ef7c7a AS dependency-hack
+FROM debian:13.5-slim@sha256:b6e2a152f22a40ff69d92cb397223c906017e1391a73c952b588e51af8883bf8 AS dependency-hack
 ARG APP_ROOT
 
 WORKDIR ${APP_ROOT}
