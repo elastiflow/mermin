@@ -539,7 +539,7 @@ fn dispatch_flow_event(
         static BACKPRESSURE_DROP_COUNT: std::sync::atomic::AtomicU64 =
             std::sync::atomic::AtomicU64::new(0);
         let drop_count = BACKPRESSURE_DROP_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        if drop_count % 1000 == 0 {
+        if drop_count.is_multiple_of(1000) {
             warn!(
                 event.name = "span.producer.worker.backpressure",
                 worker_count = worker_count,
@@ -2123,9 +2123,7 @@ pub async fn orphan_scanner_task(
 
                 // Check map utilization and warn if approaching capacity
                 let capacity = flow_stats_capacity as u64;
-                if capacity > 0 {
-                    let utilization_pct = (ebpf_map_size * 100) / capacity;
-                    if utilization_pct >= 80 {
+                if let Some(utilization_pct) = (ebpf_map_size * 100).checked_div(capacity) && utilization_pct >= 80 {
                         warn!(
                             event.name = "ebpf_map.high_utilization",
                             map = EbpfMapName::FlowStats.as_str(),
@@ -2135,7 +2133,6 @@ pub async fn orphan_scanner_task(
                             "eBPF map utilization is high, new flow insertions may silently fail in the kernel. \
                              Consider increasing the flow_stats max capacity (flow_stats_capacity) in config."
                         );
-                    }
                 }
 
                 for key in stale_keys {
@@ -2835,18 +2832,18 @@ mod tests {
         let last_recorded_reverse_bytes = 4_000u64;
 
         // Perform the metadata reset exactly as record_flow now does.
-        let mut reset_stats = stats;
-        reset_stats.forward_metadata_seen = 0;
-        reset_stats.reverse_metadata_seen = 0;
-        reset_stats.ip_dscp = 0;
-        reset_stats.ip_ecn = 0;
-        reset_stats.ip_ttl = 0;
-        reset_stats.ip_flow_label = 0;
-        reset_stats.reverse_ip_dscp = 0;
-        reset_stats.reverse_ip_ecn = 0;
-        reset_stats.reverse_ip_ttl = 0;
-        reset_stats.reverse_ip_flow_label = 0;
-        // (reset_stats is written back to the eBPF map here in the real function)
+        let mut _reset_stats = stats;
+        _reset_stats.forward_metadata_seen = 0;
+        _reset_stats.reverse_metadata_seen = 0;
+        _reset_stats.ip_dscp = 0;
+        _reset_stats.ip_ecn = 0;
+        _reset_stats.ip_ttl = 0;
+        _reset_stats.ip_flow_label = 0;
+        _reset_stats.reverse_ip_dscp = 0;
+        _reset_stats.reverse_ip_ecn = 0;
+        _reset_stats.reverse_ip_ttl = 0;
+        _reset_stats.reverse_ip_flow_label = 0;
+        // (_reset_stats is written back to the eBPF map here in the real function)
 
         // Delta computation (after drop(map)) still reads from the original `stats`.
         let delta_packets = stats.packets.saturating_sub(last_recorded_packets);

@@ -1,0 +1,200 @@
+misconfigurations:
+  # Mermin
+  - id: DS-0002
+    statement: Mermin is an eBPF agent, needs root
+    paths:
+      - Dockerfile
+  - id: DS-0026
+    statement: We do not define HEALTHCHECK in the Dockerfile, defined in the Helm chart instead
+    paths:
+      - Dockerfile
+  - id: KSV-0001
+    statement: Mermin is an eBPF agent, needs escalated privileges
+    paths:
+      - charts/mermin/**/*
+  - id: KSV-0003
+    statement: Mermin is an eBPF agent, needs elevated caps
+    paths:
+      - charts/mermin/**/*
+  - id: KSV-0004
+    statement: Mermin is an eBPF agent, needs elevated caps
+    paths:
+      - charts/mermin/**/*
+  - id: KSV-0010
+    statement: Mermin is an eBPF agent, needs hostPID for enrichment
+    paths:
+      - charts/mermin/**/*
+  - id: KSV-0011
+    statement: Not setting default cpu/memory requests/limits, up to the user to define reasonable limits.
+    paths:
+      - charts/mermin/**/*
+  - id: KSV-0015
+    statement: Not setting default cpu/memory requests/limits, up to the user to define reasonable limits.
+    paths:
+      - charts/mermin/**/*
+  - id: KSV-0016
+    statement: Not setting default cpu/memory requests/limits, up to the user to define reasonable limits.
+    paths:
+      - charts/mermin/**/*
+  - id: KSV-0017
+    statement: Mermin is an eBPF agent, may be privileged
+    paths:
+      - charts/mermin/**/*
+  - id: KSV-0018
+    statement: Not setting default cpu/memory requests/limits, up to the user to define reasonable limits.
+    paths:
+      - charts/mermin/**/*
+  - id: KSV-0020
+    statement: Mermin is an eBPF agent, needs root
+    paths:
+      - charts/mermin/**/*
+  - id: KSV-0021
+    statement: Mermin is an eBPF agent, needs root
+    paths:
+      - charts/mermin/**/*
+  - id: KSV-0023
+    statement: Mermin is an eBPF agent, needs host volume mounts
+    paths:
+      - charts/mermin/**/*
+  - id: KSV-0030
+    statement: Mermin is an eBPF agent, up to the user to limit the Seccomp policy
+    paths:
+      - charts/mermin/**/*
+  - id: KSV-0104
+    statement: Mermin is an eBPF agent, up to the user to limit the Seccomp policy
+    paths:
+      - charts/mermin/**/*
+  - id: KSV-0105
+    statement: Mermin is an eBPF agent, needs root
+    paths:
+      - charts/mermin/**/*
+  - id: KSV-0106
+    statement: Mermin is an eBPF agent, needs elevated caps
+    paths:
+      - charts/mermin/**/*
+  - id: KSV-0125
+    statement: ghcr.io/elastiflow/mermin is an official Mermin registry
+    paths:
+      - charts/mermin/**/*
+  # Traffic Generator
+  - id: KSV-0011
+    statement: Chart with a traffic generator, not meant to be compliant
+    paths:
+      - charts/traffic-gen/**/*
+  - id: KSV-0001
+    statement: Chart with a traffic generator, not meant to be compliant
+    paths:
+      - charts/traffic-gen/**/*
+  - id: KSV-0003
+    statement: Chart with a traffic generator, not meant to be compliant
+    paths:
+      - charts/traffic-gen/**/*
+  - id: KSV-0004
+    statement: Chart with a traffic generator, not meant to be compliant
+    paths:
+      - charts/traffic-gen/**/*
+  - id: KSV-0012
+    statement: Chart with a traffic generator, not meant to be compliant
+    paths:
+      - charts/traffic-gen/**/*
+  - id: KSV-0013
+    statement: Chart with a traffic generator, not meant to be compliant
+    paths:
+      - charts/traffic-gen/**/*
+  - id: KSV-0014
+    statement: Chart with a traffic generator, not meant to be compliant
+    paths:
+      - charts/traffic-gen/**/*
+  - id: KSV-0020
+    statement: Chart with a traffic generator, not meant to be compliant
+    paths:
+      - charts/traffic-gen/**/*
+  - id: KSV-0021
+    statement: Chart with a traffic generator, not meant to be compliant
+    paths:
+      - charts/traffic-gen/**/*
+  - id: KSV-0030
+    statement: Chart with a traffic generator, not meant to be compliant
+    paths:
+      - charts/traffic-gen/**/*
+  - id: KSV-0104
+    statement: Chart with a traffic generator, not meant to be compliant
+    paths:
+      - charts/traffic-gen/**/*
+  - id: KSV-0105
+    statement: Chart with a traffic generator, not meant to be compliant
+    paths:
+      - charts/traffic-gen/**/*
+  - id: KSV-0106
+    statement: Chart with a traffic generator, not meant to be compliant
+    paths:
+      - charts/traffic-gen/**/*
+  - id: KSV-0125
+    statement: Chart with a traffic generator, not meant to be compliant
+    paths:
+      - charts/traffic-gen/**/*
+  # Examples
+  - id: KSV-0001
+    statement: Examples, not meant to be compliant
+    paths:
+      - docs/deployment/examples/**/*
+  - id: KSV-0003
+    statement: Examples, not meant to be compliant
+    paths:
+      - docs/deployment/examples/**/*
+  - id: KSV-0004
+    statement: Examples, not meant to be compliant
+    paths:
+      - docs/deployment/examples/**/*
+  - id: KSV-0011
+    statement: Examples, not meant to be compliant
+    paths:
+      - docs/deployment/examples/**/*
+  - id: KSV-0012
+    statement: Examples, not meant to be compliant
+    paths:
+      - docs/deployment/examples/**/*
+  - id: KSV-0014
+    statement: Examples, not meant to be compliant
+    paths:
+      - docs/deployment/examples/**/*
+  - id: KSV-0015
+    statement: Examples, not meant to be compliant
+    paths:
+      - docs/deployment/examples/**/*
+  - id: KSV-0016
+    statement: Examples, not meant to be compliant
+    paths:
+      - docs/deployment/examples/**/*
+  - id: KSV-0018
+    statement: Examples, not meant to be compliant
+    paths:
+      - docs/deployment/examples/**/*
+  - id: KSV-0020
+    statement: Examples, not meant to be compliant
+    paths:
+      - docs/deployment/examples/**/*
+  - id: KSV-0021
+    statement: Examples, not meant to be compliant
+    paths:
+      - docs/deployment/examples/**/*
+  - id: KSV-0030
+    statement: Examples, not meant to be compliant
+    paths:
+      - docs/deployment/examples/**/*
+  - id: KSV-0104
+    statement: Examples, not meant to be compliant
+    paths:
+      - docs/deployment/examples/**/*
+  - id: KSV-0106
+    statement: Examples, not meant to be compliant
+    paths:
+      - docs/deployment/examples/**/*
+  - id: KSV-0118
+    statement: Examples, not meant to be compliant
+    paths:
+      - docs/deployment/examples/**/*
+  - id: KSV-0125
+    statement: Examples, not meant to be compliant
+    paths:
+      - docs/deployment/examples/**/*
