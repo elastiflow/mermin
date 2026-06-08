@@ -48,7 +48,7 @@ jobs:
           dockerfile: Dockerfile
       - uses: actions-rust-lang/setup-rust-toolchain@2b1f5e9b395427c92ee4e3331786ca3c37afe2d7 # v1.16.0
         with:
-          toolchain: nightly-2025-06-23
+          toolchain: nightly-2026-04-11
           components: clippy, rust-src
       - name: Cache dependencies
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
@@ -85,7 +85,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: actions-rust-lang/setup-rust-toolchain@2b1f5e9b395427c92ee4e3331786ca3c37afe2d7 # v1.16.0
         with:
-          toolchain: nightly-2025-06-23
+          toolchain: nightly-2026-04-11
           components: rust-src
       - name: Cache dependencies
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5

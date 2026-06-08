@@ -25,7 +25,7 @@ use crate::{
 };
 
 /// TCX ordering strategy for kernel >= 6.6
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Default, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum TcxOrderStrategy {
     /// Attach at the tail of the TCX chain (runs after all existing programs)
@@ -33,13 +33,8 @@ pub enum TcxOrderStrategy {
     Last,
     /// Attach at the head of the TCX chain (runs before all existing programs)
     /// Use with caution - may interfere with CNI functionality
+    #[default]
     First,
-}
-
-impl Default for TcxOrderStrategy {
-    fn default() -> Self {
-        Self::First
-    }
 }
 
 impl fmt::Display for TcxOrderStrategy {

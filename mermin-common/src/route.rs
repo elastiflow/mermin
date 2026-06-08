@@ -451,7 +451,7 @@ impl RplSourceRouteHeader {
             return 0;
         }
 
-        if (addresses_len - size_final) % size_inter != 0 {
+        if !(addresses_len - size_final).is_multiple_of(size_inter) {
             // Malformed header: the total length of intermediate addresses
             // is not a multiple of the intermediate address size.
             return 0;

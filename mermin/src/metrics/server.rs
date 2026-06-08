@@ -301,10 +301,8 @@ async fn metrics_summary_handler(debug_enabled: bool) -> impl IntoResponse {
             }
         }
 
-        let all_metrics: Vec<MetricSummary> = standard_metrics
-            .into_iter()
-            .chain(debug_metrics.into_iter())
-            .collect();
+        let all_metrics: Vec<MetricSummary> =
+            standard_metrics.into_iter().chain(debug_metrics).collect();
 
         MetricsSummaryResponse {
             debug_metrics_enabled: debug_enabled,
