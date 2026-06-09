@@ -10,7 +10,7 @@ use aya::maps::{HashMap as EbpfHashMap, RingBuf};
 use dashmap::DashMap;
 use fxhash::FxBuildHasher;
 use mermin_common::{
-    FlowEvent, FlowKey, FlowStats, ListeningPortKey, MapUnit,
+    FlowEvent, FlowKey, FlowStats, IpVersion, ListeningPortKey, MapUnit, TunnelType,
     eth::EtherType,
     ip::{IpDscp, IpEcn, IpProto},
     tcp::{TCP_FLAG_FIN, TCP_FLAG_RST},
@@ -27,7 +27,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::{
     filter::source::PacketFilter,
-    ip::{Error, flow_key_to_ip_addrs},
+    ip::{Error, flow_key_from_inner_headers, flow_key_to_ip_addrs},
     metrics::{
         self,
         ebpf::{EbpfMapName, EbpfMapOperation, EbpfMapStatus, map_entry_not_found},
@@ -76,6 +76,30 @@ pub type FlowStore = Arc<DashMap<Arc<str>, FlowEntry, FxBuildHasher>>;
 /// Entry in the flow map containing the flow span.
 pub struct FlowEntry {
     pub flow_span: FlowSpan,
+}
+
+/// Outer tunnel transport metadata for encapsulated flows.
+struct OuterTunnel {
+    key: FlowKey,
+    tunnel_type: TunnelType,
+    vni: u32,
+}
+
+/// Returns the UDP payload copied into `FlowEvent.packet_data` for userspace tunnel parsing.
+fn tunnel_payload_from_event(event: &FlowEvent) -> &[u8] {
+    let offset = event.parsed_offset as usize;
+    let snaplen = event.snaplen as usize;
+    let len = if snaplen > offset {
+        snaplen - offset
+    } else {
+        event
+            .packet_data
+            .iter()
+            .rposition(|&b| b != 0)
+            .map(|i| i + 1)
+            .unwrap_or(0)
+    };
+    &event.packet_data[..len.min(event.packet_data.len())]
 }
 
 /// Shared components that need to be accessed by multiple tasks and the shutdown manager
@@ -707,20 +731,7 @@ impl FlowWorker {
             return self.create_direct_flow(event).await;
         }
 
-        // TODO: Skip tunneled flow processing for now - untested and needs refactoring
-        debug!(
-            event.name = "tunneled_flow.skipped",
-            worker.id = self.worker_id,
-            protocol = ?event.flow_key.protocol,
-            src_ip = ?event.flow_key.src_ip,
-            dst_ip = ?event.flow_key.dst_ip,
-            "skipping tunneled flow processing - not yet implemented"
-        );
-
-        self.remove_ebpf_map_entry(&self.flow_stats_map, &event.flow_key)
-            .await;
-
-        Ok(())
+        self.create_tunneled_flow(event).await
     }
 
     async fn remove_ebpf_map_entry(
@@ -799,7 +810,18 @@ impl FlowWorker {
             )
             .into();
 
-        self.create_flow_span(community_id, &event.flow_key, &stats)
+        if self
+            .flow_store
+            .get(&community_id)
+            .is_some_and(|e| e.flow_span.attributes.tunnel_type.is_some())
+        {
+            self.remove_ebpf_map_entry(&self.flow_stats_map, &event.flow_key)
+                .await;
+            guard.keep();
+            return Ok(());
+        }
+
+        self.create_flow_span(community_id, &event.flow_key, &stats, None)
             .await?;
 
         guard.keep();
@@ -840,32 +862,90 @@ impl FlowWorker {
 
     /// Slow path for tunneled traffic.
     /// Parses packet_data to extract innermost 5-tuple and tunnel metadata.
-    #[allow(dead_code)]
     async fn create_tunneled_flow(&self, event: FlowEvent) -> Result<(), Error> {
-        // Parse only the UNPARSED portion (inner headers for tunnels)
-        let unparsed_data = &event.packet_data[..];
-        let parsed = parse_packet_from_offset(unparsed_data, event.parsed_offset)
-            .map_err(|_| Error::UnknownIpAddrType)?;
+        let guard = EbpfFlowGuard::new(event.flow_key, Arc::clone(&self.flow_stats_map));
 
-        // Extract innermost 5-tuple for Community ID
-        match parsed {
-            ParsedPacket::Tunneled { inner, .. } => {
-                // TODO: Generate Community ID from innermost 5-tuple
-                // TODO: Map eBPF FlowKey → Community ID
-                // TODO: Create FlowSpan with tunnel metadata
+        let stats = self
+            .get_ebpf_map_entry(&self.flow_stats_map, &event.flow_key)
+            .await
+            .map_err(|_| Error::FlowNotFound)?;
 
-                warn!(
-                    event.name = "tunneled_flow.not_implemented",
+        if !self.should_process_flow(&event.flow_key, &stats) {
+            self.remove_ebpf_map_entry(&self.flow_stats_map, &event.flow_key)
+                .await;
+            guard.keep();
+            return Ok(());
+        }
+
+        let unparsed_data = tunnel_payload_from_event(&event);
+
+        let parsed = match parse_packet_from_offset(
+            unparsed_data,
+            &event.flow_key,
+            stats.src_mac,
+            [0; 6],
+            self.vxlan_port,
+            self.geneve_port,
+        ) {
+            Ok(p) => p,
+            Err(e) => {
+                debug!(
+                    event.name = "tunneled_flow.parse_failed",
                     worker.id = self.worker_id,
-                    inner.src_ip = %inner.src_ip,
-                    inner.dst_ip = %inner.dst_ip,
-                    "tunneled flow processing not yet fully implemented"
+                    payload.len = unparsed_data.len(),
+                    error.message = %e,
+                    "failed to parse tunneled flow payload"
                 );
+                self.remove_ebpf_map_entry(&self.flow_stats_map, &event.flow_key)
+                    .await;
+                guard.keep();
+                return Ok(());
             }
-            ParsedPacket::Direct { .. } => {
-                // This shouldn't happen - we already checked is_likely_tunnel
-                warn!("expected tunneled packet but got plain, treating as error");
-            }
+        };
+
+        let ParsedPacket::Tunneled {
+            inner, tunnel_info, ..
+        } = parsed
+        else {
+            debug!(
+                event.name = "tunneled_flow.unexpected_direct",
+                worker.id = self.worker_id,
+                "expected tunneled packet but parser returned direct"
+            );
+            self.remove_ebpf_map_entry(&self.flow_stats_map, &event.flow_key)
+                .await;
+            guard.keep();
+            return Ok(());
+        };
+
+        let inner_key = flow_key_from_inner_headers(&inner);
+        let (src_addr, dst_addr) = flow_key_to_ip_addrs(&inner_key)?;
+        let community_id: Arc<str> = self
+            .community_id_generator
+            .generate(
+                src_addr,
+                dst_addr,
+                inner_key.src_port,
+                inner_key.dst_port,
+                inner_key.protocol,
+            )
+            .into();
+
+        let outer_tunnel = Some(OuterTunnel {
+            key: event.flow_key,
+            tunnel_type: tunnel_info.tunnel_type,
+            vni: tunnel_info.vni,
+        });
+
+        self.create_flow_span(community_id, &inner_key, &stats, outer_tunnel)
+            .await?;
+
+        guard.keep();
+
+        if metrics::registry::debug_enabled() {
+            metrics::registry::FLOW_SPANS_PROCESSED_TOTAL
+                .with_label_values(&[&self.worker_id.to_string()])
+                .inc();
         }
 
         Ok(())
@@ -897,12 +977,17 @@ impl FlowWorker {
         community_id: Arc<str>,
         flow_key: &FlowKey,
         stats: &FlowStats,
+        outer_tunnel: Option<OuterTunnel>,
     ) -> Result<(), Error> {
-        let is_ip_flow = stats.ether_type == EtherType::Ipv4 || stats.ether_type == EtherType::Ipv6;
-        let is_ipv6 = stats.ether_type == EtherType::Ipv6;
-        let is_tcp = stats.protocol == IpProto::Tcp;
-        let is_icmp = stats.protocol == IpProto::Icmp;
-        let is_icmpv6 = stats.protocol == IpProto::Ipv6Icmp;
+        // flow_key carries the application 5-tuple (inner headers when tunneled).
+        // stats.protocol is the eBPF-tracked outer transport (UDP for VXLAN/Geneve).
+        let transport = flow_key.protocol;
+        let is_ip_flow =
+            flow_key.ip_version == IpVersion::V4 || flow_key.ip_version == IpVersion::V6;
+        let is_ipv6 = flow_key.ip_version == IpVersion::V6;
+        let is_tcp = transport == IpProto::Tcp;
+        let is_icmp = transport == IpProto::Icmp;
+        let is_icmpv6 = transport == IpProto::Ipv6Icmp;
         let start_time_nanos = stats.first_seen_ns + self.boot_time_offset_nanos;
         let end_time_nanos = stats.last_seen_ns + self.boot_time_offset_nanos;
         let iface_name: Option<Arc<str>> = self
@@ -911,10 +996,32 @@ impl FlowWorker {
             .get(&stats.ifindex)
             .map(|s| Arc::from(s.as_str()));
         let (src_addr, dst_addr) = flow_key_to_ip_addrs(flow_key)?;
-        let timeout = self.calculate_timeout(stats);
+        let (icmp_type, icmp_code) = if outer_tunnel.is_some() && (is_icmp || is_icmpv6) {
+            (
+                (flow_key.src_port >> 8) as u8,
+                (flow_key.src_port & 0xff) as u8,
+            )
+        } else {
+            (stats.icmp_type, stats.icmp_code)
+        };
+        let (reverse_icmp_type, reverse_icmp_code) = if outer_tunnel.is_some() {
+            (0, 0)
+        } else {
+            (stats.reverse_icmp_type, stats.reverse_icmp_code)
+        };
+
+        let outer_tunnel_addrs = match &outer_tunnel {
+            Some(tunnel) => Some(flow_key_to_ip_addrs(&tunnel.key)?),
+            None => None,
+        };
+        let infer_key = outer_tunnel
+            .as_ref()
+            .map(|tunnel| tunnel.key)
+            .unwrap_or(*flow_key);
+        let timeout = self.calculate_timeout(stats, transport);
         let span_kind = self
             .direction_inferrer
-            .infer_from_stats(flow_key, stats)
+            .infer_from_stats(&infer_key, stats)
             .await;
         let is_server = span_kind == SpanKind::Server;
         let is_client = span_kind == SpanKind::Client;
@@ -1015,29 +1122,18 @@ impl FlowWorker {
                     Arc::from(lossy.trim_end_matches('\0'))
                 }),
 
-                flow_icmp_type_id: (is_icmp || is_icmpv6).then_some(stats.icmp_type),
-                flow_icmp_type_name: icmp_type_name(is_icmp, is_icmpv6, stats.icmp_type),
-                flow_icmp_code_id: (is_icmp || is_icmpv6).then_some(stats.icmp_code),
-                flow_icmp_code_name: icmp_code_name(
-                    is_icmp,
-                    is_icmpv6,
-                    stats.icmp_type,
-                    stats.icmp_code,
-                ),
-                flow_reverse_icmp_type_id: (is_icmp || is_icmpv6)
-                    .then_some(stats.reverse_icmp_type),
-                flow_reverse_icmp_type_name: icmp_type_name(
-                    is_icmp,
-                    is_icmpv6,
-                    stats.reverse_icmp_type,
-                ),
-                flow_reverse_icmp_code_id: (is_icmp || is_icmpv6)
-                    .then_some(stats.reverse_icmp_code),
+                flow_icmp_type_id: (is_icmp || is_icmpv6).then_some(icmp_type),
+                flow_icmp_type_name: icmp_type_name(is_icmp, is_icmpv6, icmp_type),
+                flow_icmp_code_id: (is_icmp || is_icmpv6).then_some(icmp_code),
+                flow_icmp_code_name: icmp_code_name(is_icmp, is_icmpv6, icmp_type, icmp_code),
+                flow_reverse_icmp_type_id: (is_icmp || is_icmpv6).then_some(reverse_icmp_type),
+                flow_reverse_icmp_type_name: icmp_type_name(is_icmp, is_icmpv6, reverse_icmp_type),
+                flow_reverse_icmp_code_id: (is_icmp || is_icmpv6).then_some(reverse_icmp_code),
                 flow_reverse_icmp_code_name: icmp_code_name(
                     is_icmp,
                     is_icmpv6,
-                    stats.reverse_icmp_type,
-                    stats.reverse_icmp_code,
+                    reverse_icmp_type,
+                    reverse_icmp_code,
                 ),
 
                 flow_bytes_delta: 0,
@@ -1049,9 +1145,30 @@ impl FlowWorker {
                 flow_reverse_packets_delta: 0,
                 flow_reverse_packets_total: 0,
 
+                tunnel_type: outer_tunnel.as_ref().map(|t| t.tunnel_type),
+                tunnel_id: outer_tunnel.as_ref().map(|t| t.vni),
+                tunnel_network_type: outer_tunnel.as_ref().map(|_| stats.ether_type),
+                tunnel_network_transport: outer_tunnel.as_ref().map(|_| IpProto::Udp),
+                tunnel_source_address: outer_tunnel_addrs
+                    .as_ref()
+                    .map(|(src, _)| Arc::from(src.to_string())),
+                tunnel_destination_address: outer_tunnel_addrs
+                    .as_ref()
+                    .map(|(_, dst)| Arc::from(dst.to_string())),
+                tunnel_source_port: outer_tunnel.as_ref().map(|t| t.key.src_port),
+                tunnel_destination_port: outer_tunnel.as_ref().map(|t| t.key.dst_port),
+                tunnel_network_interface_mac: outer_tunnel
+                    .as_ref()
+                    .map(|_| Arc::from(MacAddr::from(stats.src_mac).to_string())),
+
                 ..Default::default()
             }),
-            flow_key: Some(*flow_key),
+            flow_key: Some(
+                outer_tunnel
+                    .as_ref()
+                    .map(|tunnel| tunnel.key)
+                    .unwrap_or(*flow_key),
+            ),
             last_recorded_packets: 0,
             last_recorded_bytes: 0,
             last_recorded_reverse_packets: 0,
@@ -1112,9 +1229,9 @@ impl FlowWorker {
         Ok(())
     }
 
-    /// Calculate timeout duration based on protocol and flow stats
-    fn calculate_timeout(&self, stats: &FlowStats) -> Duration {
-        match stats.protocol {
+    /// Calculate timeout duration based on application protocol and flow stats.
+    fn calculate_timeout(&self, stats: &FlowStats, transport: IpProto) -> Duration {
+        match transport {
             IpProto::Icmp | IpProto::Ipv6Icmp => self.icmp_timeout,
             IpProto::Tcp => {
                 if stats.tcp_flags & TCP_FLAG_FIN != 0 {
@@ -2401,7 +2518,7 @@ mod tests {
         let worker = create_test_worker_for_timeout();
         let stats = create_test_stats(IpProto::Icmp);
 
-        let timeout = worker.calculate_timeout(&stats);
+        let timeout = worker.calculate_timeout(&stats, stats.protocol);
         assert_eq!(timeout, worker.icmp_timeout);
 
         // Prevent drop to avoid IO Safety violation from zeroed eBPF map
@@ -2413,7 +2530,7 @@ mod tests {
         let worker = create_test_worker_for_timeout();
         let stats = create_test_stats(IpProto::Ipv6Icmp);
 
-        let timeout = worker.calculate_timeout(&stats);
+        let timeout = worker.calculate_timeout(&stats, stats.protocol);
         assert_eq!(timeout, worker.icmp_timeout);
 
         std::mem::forget(worker);
@@ -2426,7 +2543,7 @@ mod tests {
         stats.tcp_flags = 0x10; // ACK only
         stats.forward_tcp_flags = 0x10;
 
-        let timeout = worker.calculate_timeout(&stats);
+        let timeout = worker.calculate_timeout(&stats, stats.protocol);
         assert_eq!(timeout, worker.tcp_timeout);
 
         std::mem::forget(worker);
@@ -2439,7 +2556,7 @@ mod tests {
         stats.tcp_flags = TCP_FLAG_FIN;
         stats.forward_tcp_flags = TCP_FLAG_FIN;
 
-        let timeout = worker.calculate_timeout(&stats);
+        let timeout = worker.calculate_timeout(&stats, stats.protocol);
         assert_eq!(timeout, worker.tcp_fin_timeout);
 
         std::mem::forget(worker);
@@ -2452,7 +2569,7 @@ mod tests {
         stats.tcp_flags = TCP_FLAG_RST;
         stats.forward_tcp_flags = TCP_FLAG_RST;
 
-        let timeout = worker.calculate_timeout(&stats);
+        let timeout = worker.calculate_timeout(&stats, stats.protocol);
         assert_eq!(timeout, worker.tcp_rst_timeout);
 
         std::mem::forget(worker);
@@ -2462,7 +2579,7 @@ mod tests {
     fn test_calculate_timeout_udp() {
         let worker = create_test_worker_for_timeout();
         let stats = create_test_stats(IpProto::Udp);
-        let timeout = worker.calculate_timeout(&stats);
+        let timeout = worker.calculate_timeout(&stats, stats.protocol);
         assert_eq!(timeout, worker.udp_timeout);
 
         std::mem::forget(worker);
@@ -2472,10 +2589,39 @@ mod tests {
     fn test_calculate_timeout_generic() {
         let worker = create_test_worker_for_timeout();
         let stats = create_test_stats(IpProto::Gre);
-        let timeout = worker.calculate_timeout(&stats);
+        let timeout = worker.calculate_timeout(&stats, stats.protocol);
         assert_eq!(timeout, worker.generic_timeout);
 
         std::mem::forget(worker);
+    }
+
+    #[test]
+    fn test_calculate_timeout_uses_application_protocol_for_tunneled_flows() {
+        let worker = create_test_worker_for_timeout();
+        let stats = create_test_stats(IpProto::Udp);
+        let timeout = worker.calculate_timeout(&stats, IpProto::Icmp);
+        assert_eq!(timeout, worker.icmp_timeout);
+
+        std::mem::forget(worker);
+    }
+
+    #[test]
+    fn test_tunneled_span_uses_outer_ebpf_key() {
+        let inner = FlowKey {
+            src_port: (8 << 8) | 0,
+            dst_port: 0,
+            protocol: IpProto::Icmp,
+            ..FlowKey::default()
+        };
+        let outer = FlowKey {
+            src_port: 40000,
+            dst_port: 8472,
+            protocol: IpProto::Udp,
+            ..FlowKey::default()
+        };
+        let ebpf_key = Some(outer).unwrap_or(inner);
+        assert_eq!(ebpf_key.protocol, IpProto::Udp);
+        assert_eq!(ebpf_key.dst_port, 8472);
     }
 
     #[test]
@@ -3064,4 +3210,18 @@ mod tests {
             "future last_seen must not be classified as stale"
         );
     }
+}
+
+#[cfg(test)]
+#[test]
+fn tunnel_payload_uses_snaplen_when_available() {
+    let mut event = FlowEvent {
+        flow_key: FlowKey::default(),
+        snaplen: 20,
+        parsed_offset: 8,
+        packet_data: [0; 192],
+    };
+    event.packet_data[..12].copy_from_slice(&[0x08; 12]);
+    let payload = tunnel_payload_from_event(&event);
+    assert_eq!(payload.len(), 12);
 }
