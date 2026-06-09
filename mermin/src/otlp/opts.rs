@@ -141,17 +141,20 @@ pub struct AuthOptions {
     pub bearer: Option<String>, // TODO: Add support for api_key, oauth2, mtls, etc. - ENG-120
 }
 
-/// # Example (YAML)
-/// ```yaml
-/// auth:
-///   basic:
-///     user: foo
-///     pass: env("MY_PASSWORD_ENV_VAR")
+/// # Example (HCL)
+/// ```hcl
+/// auth = {
+///   basic = {
+///     user = "foo"
+///     pass = env("MY_PASSWORD_ENV_VAR")
+///   }
+/// }
 /// ```
+/// YAML configs should use `${MY_PASSWORD_ENV_VAR}` instead.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct BasicAuthOptions {
     pub user: String,
-    pub pass: String, // TODO: Support environment variable substitution - ENG-120
+    pub pass: String,
 }
 
 /// TLS configuration for secure exporter connections.
@@ -197,18 +200,30 @@ pub struct TlsOptions {
     pub client_key: Option<String>,
 }
 
+/// Resolves `${VAR}` placeholders in YAML config values at auth header generation time.
+/// HCL configs use the `env()` function, which is evaluated when the config loads.
+fn resolve_env_var(value: &str) -> Result<String, String> {
+    if let Some(var_name) = value.strip_prefix("${").and_then(|s| s.strip_suffix('}')) {
+        std::env::var(var_name).map_err(|_| format!("environment variable '{var_name}' is not set"))
+    } else {
+        Ok(value.to_string())
+    }
+}
+
 impl AuthOptions {
     pub fn generate_auth_headers(&self) -> Result<HashMap<String, String>, String> {
         let mut headers = HashMap::new();
 
         if let Some(basic) = &self.basic {
-            let credentials =
-                general_purpose::STANDARD.encode(format!("{}:{}", basic.user, basic.pass));
+            let user = resolve_env_var(&basic.user)?;
+            let pass = resolve_env_var(&basic.pass)?;
+            let credentials = general_purpose::STANDARD.encode(format!("{user}:{pass}"));
             headers.insert("Authorization".to_string(), format!("Basic {credentials}"));
         }
 
         if let Some(bearer) = &self.bearer {
-            headers.insert("Authorization".to_string(), format!("Bearer {bearer}"));
+            let token = resolve_env_var(bearer)?;
+            headers.insert("Authorization".to_string(), format!("Bearer {token}"));
         }
 
         // TODO: Add support for other auth methods like api_key, oauth2, mtls, etc. - ENG-120
@@ -341,5 +356,44 @@ mod tests {
     fn test_exporter_protocol_display() {
         assert_eq!(ExporterProtocol::Grpc.to_string(), "grpc");
         assert_eq!(ExporterProtocol::HttpBinary.to_string(), "http_binary");
+    }
+
+    #[test]
+    fn resolve_env_var_plain_string() {
+        assert_eq!(resolve_env_var("secret").unwrap(), "secret");
+    }
+
+    #[test]
+    fn resolve_env_var_dollar_form() {
+        unsafe { std::env::set_var("OTLP_TEST_TOKEN", "bearer_token") };
+        assert_eq!(
+            resolve_env_var("${OTLP_TEST_TOKEN}").unwrap(),
+            "bearer_token"
+        );
+        unsafe { std::env::remove_var("OTLP_TEST_TOKEN") };
+    }
+
+    #[test]
+    fn resolve_env_var_missing() {
+        assert!(resolve_env_var("${OTLP_DEFINITELY_MISSING_VAR}").is_err());
+    }
+
+    #[test]
+    fn generate_auth_headers_resolves_pass() {
+        unsafe { std::env::set_var("OTLP_TEST_PASS", "secret_password") };
+        let auth = AuthOptions {
+            basic: Some(BasicAuthOptions {
+                user: "mermin".to_string(),
+                pass: "${OTLP_TEST_PASS}".to_string(),
+            }),
+            bearer: None,
+        };
+        let headers = auth.generate_auth_headers().unwrap();
+        let expected = general_purpose::STANDARD.encode("mermin:secret_password");
+        assert_eq!(
+            headers.get("Authorization").unwrap(),
+            &format!("Basic {expected}")
+        );
+        unsafe { std::env::remove_var("OTLP_TEST_PASS") };
     }
 }
