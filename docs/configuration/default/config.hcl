@@ -32,7 +32,7 @@ pipeline {
 parser {
   # Tunnel port detection (IANA defaults shown)
   geneve_port    = 6081  # IANA default for Geneve
-  vxlan_port     = 4789  # IANA default for VXLAN
+  vxlan_port     = 4789  # IANA default for VXLAN; Linux Flannel uses 8472
   wireguard_port = 51820 # IANA default for WireGuard
 }
 
