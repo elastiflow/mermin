@@ -1,3 +1,16 @@
+## [v0.4.1] - 2026-06-09
+
+### Bug Fixes
+
+- **deps:** Update pre commit (#586)
+- **deps:** Update github actions (#585)
+- **deps:** Update docker (#587)
+- Bump OpenSSL to patch CWEs () (#590)
+
+[v0.4.0..v0.4.1](https://github.com/elastiflow/mermin/compare/v0.4.0...v0.4.1)
+
+
+
 ## [v0.4.0] - 2026-06-08
 
 ### Bug Fixes
