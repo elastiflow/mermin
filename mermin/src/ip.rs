@@ -7,6 +7,8 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use mermin_common::{FlowKey, IpVersion};
 
+use crate::packet::types::InnerHeaders;
+
 /// Resolve IP addresses from raw byte arrays based on the provided IP address type.
 #[allow(dead_code)]
 pub fn resolve_addrs(
@@ -29,6 +31,33 @@ pub fn resolve_addrs(
             Ok((src, dst))
         }
     }
+}
+
+/// Build a normalized FlowKey from parsed inner tunnel headers.
+pub fn flow_key_from_inner_headers(inner: &InnerHeaders) -> FlowKey {
+    fn field(ip: IpAddr) -> ([u8; 16], IpVersion) {
+        match ip {
+            IpAddr::V4(v4) => {
+                let mut bytes = [0u8; 16];
+                bytes[..4].copy_from_slice(&v4.octets());
+                (bytes, IpVersion::V4)
+            }
+            IpAddr::V6(v6) => (v6.octets(), IpVersion::V6),
+        }
+    }
+
+    let (src_ip, ip_version) = field(inner.src_ip);
+    let (dst_ip, _) = field(inner.dst_ip);
+
+    FlowKey {
+        src_ip,
+        dst_ip,
+        src_port: inner.src_port,
+        dst_port: inner.dst_port,
+        ip_version,
+        protocol: inner.protocol,
+    }
+    .normalize()
 }
 
 /// Convert FlowKey IPs to IpAddr for Community ID generation.
@@ -70,9 +99,12 @@ impl std::error::Error for Error {}
 mod tests {
     use std::net::{IpAddr, Ipv4Addr};
 
-    use mermin_common::IpVersion;
+    use mermin_common::{IpVersion, ip::IpProto};
 
-    use crate::ip::{Error, resolve_addrs};
+    use crate::{
+        ip::{Error, flow_key_from_inner_headers, flow_key_to_ip_addrs, resolve_addrs},
+        packet::types::InnerHeaders,
+    };
 
     #[test]
     fn test_resolve_addrs_ipv4() {
@@ -110,6 +142,25 @@ mod tests {
             IpAddr::V6(addr) => assert!(addr.to_string().starts_with("2001:db8")),
             _ => panic!("Expected IPv6 address"),
         }
+    }
+
+    #[test]
+    fn test_flow_key_from_inner_headers_normalizes() {
+        let inner = InnerHeaders {
+            src_ip: IpAddr::V4(Ipv4Addr::new(10, 244, 2, 2)),
+            dst_ip: IpAddr::V4(Ipv4Addr::new(10, 244, 1, 1)),
+            src_port: (8 << 8) | 0,
+            dst_port: 0,
+            protocol: IpProto::Icmp,
+            src_mac: [0; 6],
+            dst_mac: [0; 6],
+        };
+
+        let key = flow_key_from_inner_headers(&inner);
+        let (src, dst) = flow_key_to_ip_addrs(&key).unwrap();
+        assert_eq!(src, IpAddr::V4(Ipv4Addr::new(10, 244, 1, 1)));
+        assert_eq!(dst, IpAddr::V4(Ipv4Addr::new(10, 244, 2, 2)));
+        assert_eq!(key.protocol, IpProto::Icmp);
     }
 
     #[test]

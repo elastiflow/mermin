@@ -270,14 +270,13 @@ Default:
 **Use cases**: Fine-tuning for specific CNI setups, reducing monitored interface count
 
 {% hint style="info" %}
-Mermin's goal is to show you pod-to-pod traffic which is exposed by Virtual Ethernet Devices, which match patterns like `"veth*", "gke*", "cali*"`. Currently, bridge interfaces like `"tun*"` or `flannel*` are ignored,
-because Mermin does not support parsing tunneled/encapsulated traffic. This feature will come very soon.
+Mermin's goal is to show you pod-to-pod traffic. Use `veth*` for same-node traffic and tunnel interfaces (`flannel*`, `tunl*`, `vxlan*`) or node uplinks (`eth*`) for inter-node overlay traffic. VXLAN and Geneve encapsulation is parsed automatically; set `parser.vxlan_port` to match your CNI (Linux Flannel uses `8472`, not the IANA default `4789`).
 {% endhint %}
 
 **Physical Interfaces Only:**
 
 {% hint style="warning" %}
-Most of the traffic on the physical interfaces will be ignored, because Mermin currently lacks support for tunneled/encapsulated traffic.
+On node uplinks (`eth*`), only tunneled flows (VXLAN/Geneve UDP ports) are deep-parsed into inner 5-tuples. Plain traffic on those interfaces is still tracked, but avoid monitoring both `veth*` and `eth*` for the same paths unless you need uplink-level tunnel metadata.
 {% endhint %}
 
 Monitor only physical network interfaces for inter-node traffic:
