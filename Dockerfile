@@ -103,7 +103,7 @@ RUN cargo binstall --disable-telemetry -y bpf-linker --version 0.11.1
 RUN cargo binstall --disable-telemetry -y bindgen-cli
 # https://github.com/aya-rs/aya/releases/tag/aya-v0.14.0
 # hadolint ignore=DL3059 # multi-stage build, more RUN -> better caching
-RUN cargo install --git https://github.com/aya-rs/aya --locked aya-tool
+RUN cargo install --git https://github.com/aya-rs/aya --locked --rev 302985c72850cd9a8f1d791a11d247a4fbe1c5b1 aya-tool
 
 # ---- Builder Stage ----
 FROM base AS builder

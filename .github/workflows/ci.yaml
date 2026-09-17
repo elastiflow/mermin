@@ -170,7 +170,7 @@ jobs:
       contents: read
       id-token: write
     with:
-      matrix_runner: '["ubuntu-latest-4c", "ubuntu-latest-arm-4c"]'
+      matrix_runner: '[ubuntu-latest, ubuntu-latest-arm]'
       matrix_target: '["runner", "runner-debug"]'
       runner_platform_map: |
         {
@@ -181,10 +181,10 @@ jobs:
       cache_storage: aws_s3
       cache_region: "us-east-2"
       cache_from: |
-        type=s3,region=us-east-2,bucket=docker-build-cache-296062568418-us-east-2-an,prefix=sigi/mermin-,name=mermin-{0}-{1}
-        type=s3,region=us-east-2,bucket=docker-build-cache-296062568418-us-east-2-an,prefix=sigi/mermin-,name=mermin-main-{1}
+        type=s3,region=us-east-2,bucket=docker-build-cache-296062568418-us-east-2-an,prefix=mermin/mermin-,name=mermin-{0}-{1}
+        type=s3,region=us-east-2,bucket=docker-build-cache-296062568418-us-east-2-an,prefix=mermin/mermin-,name=mermin-main-{1}
       cache_to:
-        type=s3,mode=max,region=us-east-2,bucket=docker-build-cache-296062568418-us-east-2-an,prefix=sigi/mermin-,name=mermin-{0}-{1}
+        type=s3,mode=max,region=us-east-2,bucket=docker-build-cache-296062568418-us-east-2-an,prefix=mermin/mermin-,name=mermin-{0}-{1}
       aws_iam_role: arn:aws:iam::296062568418:role/gha-docker-cache
 
   cni_tests:
