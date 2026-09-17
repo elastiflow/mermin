@@ -131,71 +131,41 @@ jobs:
           make_latest: true
 
   docker_build_push:
-    name: Docker build/push
+    name: Docker Build/Push
     needs: [release]
     if: ${{ fromJson(needs.release.outputs.new_release_published) }}
-    runs-on: ubuntu-latest-8c
-    timeout-minutes: 120
+    uses: elastiflow/gha-reusable/.github/workflows/reusable_docker_build_multiarch.yaml@v0
     permissions:
       contents: read
       packages: write
       artifact-metadata: write
       attestations: write
       id-token: write
-    strategy:
-      matrix:
-        target: [runner, runner-debug]
-    env:
-      TARGET_IMAGE_TAG: |
+    with:
+      matrix_runner: '[ubuntu-latest, ubuntu-latest-arm]'
+      matrix_target: '["runner", "runner-debug"]'
+      matrix_include_tag_suffix: '[{"target": "runner", "tag_suffix": ""}, {"target": "runner-debug", "tag_suffix": "-debug"}]'
+      runner_platform_map: |
         {
-            "runner": "${{ needs.release.outputs.new_release_git_tag }}",
-            "runner-debug": "${{ needs.release.outputs.new_release_git_tag }}-debug"
+          "ubuntu-latest": "linux/amd64",
+          "ubuntu-latest-arm": "linux/arm64"
         }
-    steps:
-      - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          fetch-depth: 0
-      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
-        id: gcr_auth
-        with:
-          token_format: "access_token"
-          project_id: "pub-artifacts-j8rjbu"
-          workload_identity_provider: "projects/701687754822/locations/global/workloadIdentityPools/github-actions/providers/github-actions"
-          service_account: "gha-registry-writer@pub-artifacts-j8rjbu.iam.gserviceaccount.com"
-          access_token_lifetime: 7200s
-      - name: Login to GCR
-        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
-        with:
-          registry: us-docker.pkg.dev
-          username: oauth2accesstoken
-          password: ${{ steps.gcr_auth.outputs.access_token }}
-      - name: Build docker image
-        uses: elastiflow/gha-reusable/actions/docker-build-push@v0
-        with:
-          registry: ghcr.io
-          image: ${{ github.repository }}
-          tag: ${{ fromJson(env.TARGET_IMAGE_TAG)[matrix.target] }}
-          platforms: linux/amd64,linux/arm64
-          target: ${{ matrix.target }}
-          push: true
-          cache_from: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-${{ matrix.target }}
-          cache_to: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-${{ matrix.target }},mode=max
-          registry_username: ${{ github.actor }}
-          registry_password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build docker image for Docker Hub
-        uses: elastiflow/gha-reusable/actions/docker-build-push@v0
-        with:
-          registry: docker.io
-          image: elastiflow/mermin
-          tag: ${{ fromJson(env.TARGET_IMAGE_TAG)[matrix.target] }}
-          platforms: linux/amd64,linux/arm64
-          target: ${{ matrix.target }}
-          push: true
-          cache_from: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-${{ matrix.target }}
-          cache_to: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-${{ matrix.target }},mode=max
-          registry_username: ${{ secrets.DOCKERHUB_USERNAME }}
-          registry_password: ${{ secrets.DOCKERHUB_API_TOKEN }}
+      version: "${{ needs.release.outputs.new_release_git_tag }}"
+      cache_storage: aws_s3
+      cache_region: "us-east-2"
+      cache_from: |
+        type=s3,region=us-east-2,bucket=docker-build-cache-296062568418-us-east-2-an,prefix=mermin/mermin-,name=mermin-{0}-{1}
+        type=s3,region=us-east-2,bucket=docker-build-cache-296062568418-us-east-2-an,prefix=mermin/mermin-,name=mermin-main-{1}
+      cache_to:
+        type=s3,mode=max,region=us-east-2,bucket=docker-build-cache-296062568418-us-east-2-an,prefix=mermin/mermin-,name=mermin-{0}-{1}
+      aws_iam_role: arn:aws:iam::296062568418:role/gha-docker-cache
+      ghcr_push: true
+      ghcr_image: ${{ github.repository }}
+      dockerhub_push: true
+      dockerhub_image: "elastiflow/mermin"
+    secrets:
+      dockerhub_username: ${{ secrets.DOCKERHUB_USERNAME }}
+      dockerhub_api_token: ${{ secrets.DOCKERHUB_API_TOKEN }}
 
   release_chart:
     name: Release Chart

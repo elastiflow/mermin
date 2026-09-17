@@ -164,47 +164,28 @@ jobs:
       #   run: ct install --target-branch ${{ github.event.repository.default_branch }}
 
   docker_build:
-    name: Docker build
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    name: Docker Build
+    uses: elastiflow/gha-reusable/.github/workflows/reusable_docker_build_multiarch.yaml@v0
     permissions:
       contents: read
       id-token: write
-    strategy:
-      matrix:
-        runner: [ubuntu-latest, ubuntu-latest-arm]
-        target: [runner, runner-debug]
-    env:
-      RUNNER_PLATFORM: |
+    with:
+      matrix_runner: '["ubuntu-latest-4c", "ubuntu-latest-arm-4c"]'
+      matrix_target: '["runner", "runner-debug"]'
+      runner_platform_map: |
         {
-            "ubuntu-latest": "linux/amd64",
-            "ubuntu-latest-arm": "linux/arm64"
+          "ubuntu-latest-4c": "linux/amd64",
+          "ubuntu-latest-arm-4c": "linux/arm64"
         }
-    steps:
-      - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
-        id: gcr_auth
-        with:
-          token_format: "access_token"
-          project_id: "pub-artifacts-j8rjbu"
-          workload_identity_provider: "projects/701687754822/locations/global/workloadIdentityPools/github-actions/providers/github-actions"
-          service_account: "gha-registry-writer@pub-artifacts-j8rjbu.iam.gserviceaccount.com"
-      - name: Login to GCR
-        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
-        with:
-          registry: us-docker.pkg.dev
-          username: oauth2accesstoken
-          password: ${{ steps.gcr_auth.outputs.access_token }}
-      - name: Build docker image
-        uses: elastiflow/gha-reusable/actions/docker-build-push@v0
-        with:
-          platforms: ${{ fromJson(env.RUNNER_PLATFORM)[matrix.runner] }}
-          target: ${{ matrix.target }}
-          provenance: ""
-          sbom: "false"
-          cache_from: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-ci-${{ matrix.target }}-${{ fromJson(env.RUNNER_PLATFORM)[matrix.runner] }}
-          cache_to: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-ci-${{ matrix.target }}-${{ fromJson(env.RUNNER_PLATFORM)[matrix.runner] }},mode=max
+      version: "local"
+      cache_storage: aws_s3
+      cache_region: "us-east-2"
+      cache_from: |
+        type=s3,region=us-east-2,bucket=docker-build-cache-296062568418-us-east-2-an,prefix=sigi/mermin-,name=mermin-{0}-{1}
+        type=s3,region=us-east-2,bucket=docker-build-cache-296062568418-us-east-2-an,prefix=sigi/mermin-,name=mermin-main-{1}
+      cache_to:
+        type=s3,mode=max,region=us-east-2,bucket=docker-build-cache-296062568418-us-east-2-an,prefix=sigi/mermin-,name=mermin-{0}-{1}
+      aws_iam_role: arn:aws:iam::296062568418:role/gha-docker-cache
 
   cni_tests:
     name: CNI Tests
