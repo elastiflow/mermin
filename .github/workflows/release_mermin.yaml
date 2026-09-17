@@ -59,6 +59,8 @@ jobs:
           fetch-depth: 0
       - name: Prepare Release
         id: prepare_release
+        # Internal action, no need to pin
+        # nosemgrep: github-actions-mutable-action-tag
         uses: elastiflow/gha-reusable/actions/prepare-release@v0
         with:
           tag_prefix: ${{ fromJson(env.BRANCH_TAG_PREFIXES)[github.ref_name] }}
@@ -108,6 +110,8 @@ jobs:
           fetch-depth: 0
       - name: Prepare Release
         id: prepare_release
+        # Internal action, no need to pin
+        # nosemgrep: github-actions-mutable-action-tag
         uses: elastiflow/gha-reusable/actions/prepare-release@v0
         with:
           tag_prefix: ${{ fromJson(env.BRANCH_TAG_PREFIXES)[github.ref_name] }}
@@ -142,7 +146,7 @@ jobs:
       attestations: write
       id-token: write
     with:
-      matrix_runner: '[ubuntu-latest, ubuntu-latest-arm]'
+      matrix_runner: '["ubuntu-latest", "ubuntu-latest-arm"]'
       matrix_target: '["runner", "runner-debug"]'
       matrix_include_tag_suffix: '[{"target": "runner", "tag_suffix": ""}, {"target": "runner-debug", "tag_suffix": "-debug"}]'
       runner_platform_map: |

@@ -16,14 +16,20 @@ jobs:
         github.event_name == 'pull_request'
         && !(github.event_name == 'pull_request' && github.event.pull_request.user.login == 'github-actions[bot]' && startsWith(github.event.pull_request.title, '[release '))
       }}
+    # Internal action, no need to pin
+    # nosemgrep: github-actions-mutable-action-tag
     uses: elastiflow/gha-reusable/.github/workflows/reusable_pr_checks.yml@v0
 
   mandatory_checks:
     name: Security checks
+    # Internal action, no need to pin
+    # nosemgrep: github-actions-mutable-action-tag
     uses: elastiflow/gha-reusable/.github/workflows/reusable_mandatory_checks.yml@v0
 
   renovate_checks:
     name: Security checks
+    # Internal action, no need to pin
+    # nosemgrep: github-actions-mutable-action-tag
     uses: elastiflow/gha-reusable/.github/workflows/reusable_renovate_checks.yml@v0
 
   fmt:
@@ -40,7 +46,7 @@ jobs:
 
   check_and_build:
     name: Check, Lint & Build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-4c
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - uses: hadolint/hadolint-action@2332a7b74a6de0dda2e2221d575162eba76ba5e5 # v3.3.0
@@ -66,8 +72,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends clang llvm libelf-dev libz-dev linux-headers-$(uname -r)
 
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@b874e25ea559687bec77e281e9b271aa1367b624 # v1.23.0
+
       - name: Install bpf-linker
-        run: command -v bpf-linker &> /dev/null || cargo install bpf-linker
+        run: command -v bpf-linker &> /dev/null || cargo binstall --disable-telemetry -y bpf-linker
 
       - name: Build eBPF and userspace code
         run: cargo build -r
@@ -102,8 +111,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends clang llvm libelf-dev libz-dev make
 
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@b874e25ea559687bec77e281e9b271aa1367b624 # v1.23.0
+
       - name: Install bpf-linker
-        run: command -v bpf-linker &> /dev/null || cargo install bpf-linker
+        run: command -v bpf-linker &> /dev/null || cargo binstall --disable-telemetry -y bpf-linker
 
       - name: Install cargo-nextest
         run: |
@@ -165,17 +177,19 @@ jobs:
 
   docker_build:
     name: Docker Build
+    # Internal action, no need to pin
+    # nosemgrep: github-actions-mutable-action-tag
     uses: elastiflow/gha-reusable/.github/workflows/reusable_docker_build_multiarch.yaml@v0
     permissions:
       contents: read
       id-token: write
     with:
-      matrix_runner: '[ubuntu-latest, ubuntu-latest-arm]'
+      matrix_runner: '["ubuntu-latest", "ubuntu-latest-arm"]'
       matrix_target: '["runner", "runner-debug"]'
       runner_platform_map: |
         {
-          "ubuntu-latest-4c": "linux/amd64",
-          "ubuntu-latest-arm-4c": "linux/arm64"
+          "ubuntu-latest": "linux/amd64",
+          "ubuntu-latest-arm": "linux/arm64"
         }
       version: "local"
       cache_storage: aws_s3

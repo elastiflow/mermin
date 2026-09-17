@@ -51,4 +51,6 @@ jobs:
       chart_dir: charts/mermin-netobserv-os-stack
       include_paths: "charts/mermin-netobserv-os-stack/**/*"
       chart_yaml_version_keys: '.version,.appVersion'
+    # Local action
+    # nosemgrep: secrets-inherit
     secrets: inherit
