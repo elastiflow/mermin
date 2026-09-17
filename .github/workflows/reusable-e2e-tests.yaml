@@ -22,6 +22,9 @@ jobs:
   build:
     name: Build Mermin Docker Image
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -29,22 +32,25 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
 
-      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
-        id: gcr_auth
-        with:
-          token_format: "access_token"
-          project_id: "pub-artifacts-j8rjbu"
-          workload_identity_provider: "projects/701687754822/locations/global/workloadIdentityPools/github-actions/providers/github-actions"
-          service_account: "gha-registry-writer@pub-artifacts-j8rjbu.iam.gserviceaccount.com"
+      - name: Set standard vars
+        id: standard_vars
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          PLATFORM: "linux/amd64"
+        run: |
+          echo "ref_name=$(echo ${REF_NAME} | tr '/' '_')" >> $GITHUB_OUTPUT
+          echo "arch=$(echo ${PLATFORM} | tr '/' '_')" >> $GITHUB_OUTPUT
 
-      - name: Login to GCR
-        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
         with:
-          registry: us-docker.pkg.dev
-          username: oauth2accesstoken
-          password: ${{ steps.gcr_auth.outputs.access_token }}
+          aws-region: us-east-2
+          role-to-assume: arn:aws:iam::296062568418:role/gha-docker-cache
+          role-duration-seconds: 3600
 
       - name: Build docker image
+        # Internal action, no need to pin
+        # nosemgrep: github-actions-mutable-action-tag
         uses: elastiflow/gha-reusable/actions/docker-build-push@v0
         with:
           image: mermin
@@ -54,8 +60,11 @@ jobs:
           load: true
           provenance: ""
           sbom: "false"
-          cache_from: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-ci-runner-debug-linux/amd64
-          cache_to: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-ci-runner-debug-linux/amd64,mode=max
+          cache_from: |
+            type=s3,region=us-east-2,bucket=docker-build-cache-296062568418-us-east-2-an,prefix=mermin/mermin-,name=mermin-${{ steps.standard_vars.outputs.ref_name }}-${{ steps.standard_vars.outputs.arch}}-runner-debug
+            type=s3,region=us-east-2,bucket=docker-build-cache-296062568418-us-east-2-an,prefix=mermin/mermin-,name=mermin-main-${{ steps.standard_vars.outputs.arch}}-runner-debug
+          cache_to:
+            type=s3,mode=max,region=us-east-2,bucket=docker-build-cache-296062568418-us-east-2-an,prefix=mermin/mermin-,name=mermin-${{ steps.standard_vars.outputs.ref_name }}-${{ steps.standard_vars.outputs.arch}}-runner-debug
 
       - name: Save Docker image as an artifact
         env:
