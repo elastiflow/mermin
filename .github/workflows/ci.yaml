@@ -67,10 +67,21 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
+      - name: Add LLVM repo
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
+          ls -la /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+          gpg --show-keys --with-fingerprint /etc/apt/trusted.gpg.d/apt.llvm.org.asc | grep '6084 F3CF 814B 57C1 CF12  EFD5 15CF 4D18 AF4F 7421'
+
+          sudo cat <<EOF | sudo tee /etc/apt/sources.list.d/llvm-22.list
+          deb [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main
+          deb-src [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main
+          EOF
+
       - name: Install eBPF dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang llvm libelf-dev libz-dev linux-headers-$(uname -r)
+          sudo apt-get install -y --no-install-recommends llvm-22-dev libclang-22-dev libelf-dev libz-dev make
 
       - name: Install cargo-binstall
         uses: cargo-bins/cargo-binstall@b874e25ea559687bec77e281e9b271aa1367b624 # v1.23.0
@@ -106,10 +117,22 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Add LLVM repo
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
+          ls -la /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+          gpg --show-keys --with-fingerprint /etc/apt/trusted.gpg.d/apt.llvm.org.asc | grep '6084 F3CF 814B 57C1 CF12  EFD5 15CF 4D18 AF4F 7421'
+
+          sudo cat <<EOF | sudo tee /etc/apt/sources.list.d/llvm-22.list
+          deb [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main
+          deb-src [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main
+          EOF
+
       - name: Install eBPF dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang llvm libelf-dev libz-dev make
+          sudo apt-get install -y --no-install-recommends llvm-22-dev libclang-22-dev libelf-dev libz-dev make
 
       - name: Install cargo-binstall
         uses: cargo-bins/cargo-binstall@b874e25ea559687bec77e281e9b271aa1367b624 # v1.23.0
