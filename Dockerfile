@@ -70,7 +70,7 @@ deb [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc]  http://apt.llvm.org/tri
 deb-src [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/trixie/ llvm-toolchain-trixie-22 main
 EOF
 
-# hadolint ignore=DL3059,DL3009 # multi-stage build, more RUN -> better caching
+# hadolint ignore=DL3059,DL3008,DL3009 # multi-stage build, more RUN -> better caching
 RUN apt-get update && apt-get install -y --no-install-recommends \
     llvm-22-dev \
     libclang-22-dev
