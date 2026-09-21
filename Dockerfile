@@ -62,21 +62,21 @@ RUN useradd --create-home --shell /bin/bash poseidon \
 
 # Install LLVM - https://apt.llvm.org/
 # hadolint ignore=DL3059 # multi-stage build, more RUN -> better caching
-RUN wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null \
+RUN wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null \
 && gpg --show-keys --with-fingerprint /etc/apt/trusted.gpg.d/apt.llvm.org.asc | grep '6084 F3CF 814B 57C1 CF12  EFD5 15CF 4D18 AF4F 7421'
-# hadolint ignore=DL3059 # multi-stage build, more RUN -> better caching
-RUN <<EOF cat > /etc/apt/sources.list.d/llvm-trixie-22.list
+# hadolint ignore=DL3059,SC2102 # multi-stage build, more RUN -> better caching
+RUN <<EOF cat > "/etc/apt/sources.list.d/llvm-trixie-22.list"
 deb [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc]  http://apt.llvm.org/trixie/ llvm-toolchain-trixie-22 main
 deb-src [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/trixie/ llvm-toolchain-trixie-22 main
 EOF
 
-# hadolint ignore=DL3059 # multi-stage build, more RUN -> better caching
+# hadolint ignore=DL3059,DL3009 # multi-stage build, more RUN -> better caching
 RUN apt-get update && apt-get install -y --no-install-recommends \
     llvm-22-dev \
     libclang-22-dev
 
-# # Install eBPF Dependencies
-# # hadolint ignore=DL3059,DL3008 # multi-stage build, more RUN -> better caching, not pinning versions for now
+# Install eBPF Dependencies
+# hadolint ignore=DL3059,DL3008,DL3009 # multi-stage build, more RUN -> better caching, not pinning versions for now
 RUN apt-get install -y --no-install-recommends \
     iputils-ping \
     libelf-dev \
