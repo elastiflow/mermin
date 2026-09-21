@@ -96,11 +96,13 @@ ENV PATH="/usr/lib/llvm-20/bin:${PATH}"
 
 # Install the core Aya build tools
 # hadolint ignore=DL3059 # multi-stage build, more RUN -> better caching
-RUN cargo install bpf-linker
+RUN cargo install cargo-binstall
 # hadolint ignore=DL3059 # multi-stage build, more RUN -> better caching
-RUN cargo install bindgen-cli
+RUN cargo binstall --disable-telemetry -y bpf-linker --version 0.11.1
 # hadolint ignore=DL3059 # multi-stage build, more RUN -> better caching
-RUN cargo install --git https://github.com/aya-rs/aya --locked aya-tool
+RUN cargo binstall --disable-telemetry -y bindgen-cli
+# hadolint ignore=DL3059 # multi-stage build, more RUN -> better caching
+RUN cargo install --git https://github.com/aya-rs/aya --locked --rev aya-v0.14.0 aya-tool
 
 # ---- Builder Stage ----
 FROM base AS builder
