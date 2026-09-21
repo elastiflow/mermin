@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.24-labs@sha256:7d49dad25a050e14338ba7028b0460243f9d911dedc160a8fe20c34738fef3af
+# syntax=docker/dockerfile:1.27-labs@sha256:ae9cc40df4eb5b6adcac0a49bdd8e43b6d29d81087fefae2ceb6fe248aab24c8
 # nosemgrep: dockerfile.security.last-user-is-root.last-user-is-root
 # Using "labs" due to "COPY --parents", https://docs.docker.com/reference/dockerfile/#copy---parents
 ARG APP_ROOT=/app
@@ -6,7 +6,7 @@ ARG APP=mermin
 
 
 # ---- Build Stage ----
-FROM debian:13.5-slim@sha256:b6e2a152f22a40ff69d92cb397223c906017e1391a73c952b588e51af8883bf8 AS dependency-hack
+FROM debian:13.7-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a AS dependency-hack
 ARG APP_ROOT
 
 WORKDIR ${APP_ROOT}
@@ -22,7 +22,7 @@ RUN cp mermin/Cargo.toml mermin/Cargo.toml.orig \
     | tr '\r' '\n' > Cargo.lock
 
 # ---- Build Stage ----
-FROM rust:1.96.0-trixie@sha256:fb328f0f58becb23ba1719940a2c94ece8b0b48afa837d05b79ef64bc1e18f6e AS base
+FROM rust:1.96.0-trixie@sha256:a8a5f0a1e5fe7dfe1d352591e4a1c7dd2c08fd70475cae872cf3458ba0df0546 AS base
 
 # Since Mermin needs root to be ran, switching to non-root in in the base/builder stages does not improve the security.
 # nosemgrep: dockerfile.security.last-user-is-root.last-user-is-root # root is needed due to eBPF
@@ -136,7 +136,7 @@ RUN cargo build --release
 # Use a distroless base image for the final container without shell support, to get sha run:
 #   skopeo inspect --override-os=linux --override-arch=amd64 --format "Name: {{.Name}} Digest: {{.Digest}}" docker://gcr.io/distroless/cc-debian13:latest
 # hadolint ignore=DL3006 # gcr.io/distroless/cc-debian12 don't have tags
-FROM gcr.io/distroless/cc-debian13@sha256:8b5d1db6d2253036a53cb8362d3e3fa82a7caf84c247772c46a023166c64e977 AS runner
+FROM gcr.io/distroless/cc-debian13@sha256:4594d59540d1948417f6ca2829ddd9294493a7c68b7528f4dd459de7f203a750 AS runner
 ARG APP_ROOT APP
 
 COPY --from=builder ${APP_ROOT}/target/release/${APP} /usr/bin/${APP}
@@ -144,7 +144,7 @@ ENTRYPOINT ["/usr/bin/mermin"]
 
 # ---- Runtime Stage ----
 # Use a distroless base image for the final container with shell support
-FROM debian:13.5-slim@sha256:b6e2a152f22a40ff69d92cb397223c906017e1391a73c952b588e51af8883bf8 AS runner-debug
+FROM debian:13.7-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a AS runner-debug
 ARG APP_ROOT APP
 
 COPY --from=builder ${APP_ROOT}/target/release/${APP} /usr/bin/${APP}
