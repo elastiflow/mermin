@@ -1,3 +1,13 @@
+## [v0.4.2] - 2026-09-21
+
+### Bug Fixes
+
+- Different docker image digests (#601)
+
+[v0.4.1..v0.4.2](https://github.com/elastiflow/mermin/compare/v0.4.1...v0.4.2)
+
+
+
 ## [v0.4.1] - 2026-06-09
 
 ### Bug Fixes
