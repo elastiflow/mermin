@@ -60,20 +60,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN useradd --create-home --shell /bin/bash poseidon \
     && echo "poseidon ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/poseidon
 
-# Install LLVM
-# Workaround for LLVM signing issue, https://github.com/llvm/llvm-project/issues/153385#issuecomment-3239875987
+# Install LLVM - https://apt.llvm.org/
 # hadolint ignore=DL3059 # multi-stage build, more RUN -> better caching
-RUN sed -i 's/sha1.second_preimage_resistance = 2026-02-01/sha1.second_preimage_resistance = 2026-04-01/' /usr/share/apt/default-sequoia.config
+RUN wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null \
+&& gpg --show-keys --with-fingerprint /etc/apt/trusted.gpg.d/apt.llvm.org.asc | grep '6084 F3CF 814B 57C1 CF12  EFD5 15CF 4D18 AF4F 7421'
 # hadolint ignore=DL3059 # multi-stage build, more RUN -> better caching
-RUN wget -q https://apt.llvm.org/llvm.sh -O /tmp/llvm.sh && chmod +x /tmp/llvm.sh \
-    && /tmp/llvm.sh 20
+RUN <<EOF cat > /etc/apt/sources.list.d/llvm-trixie-22.list
+deb [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc]  http://apt.llvm.org/trixie/ llvm-toolchain-trixie-22 main
+deb-src [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/trixie/ llvm-toolchain-trixie-22 main
+EOF
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    llvm-22-dev \
+    libclang-22-dev
 
-# Install eBPF Dependencies
-# hadolint ignore=DL3059,DL3008 # multi-stage build, more RUN -> better caching, not pinning versions for now
+# # Install eBPF Dependencies
+# # hadolint ignore=DL3059,DL3008 # multi-stage build, more RUN -> better caching, not pinning versions for now
 RUN apt-get install -y --no-install-recommends \
     iputils-ping \
-    libclang-20-dev \
-    llvm-20-dev \
     libelf-dev \
     zlib1g-dev \
     libzstd-dev \
