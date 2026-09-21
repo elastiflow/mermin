@@ -69,6 +69,8 @@ RUN <<EOF cat > /etc/apt/sources.list.d/llvm-trixie-22.list
 deb [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc]  http://apt.llvm.org/trixie/ llvm-toolchain-trixie-22 main
 deb-src [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/trixie/ llvm-toolchain-trixie-22 main
 EOF
+
+# hadolint ignore=DL3059 # multi-stage build, more RUN -> better caching
 RUN apt-get update && apt-get install -y --no-install-recommends \
     llvm-22-dev \
     libclang-22-dev
