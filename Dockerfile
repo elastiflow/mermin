@@ -63,7 +63,7 @@ RUN useradd --create-home --shell /bin/bash poseidon \
 # Install LLVM - https://apt.llvm.org/
 # hadolint ignore=DL3059 # multi-stage build, more RUN -> better caching
 RUN wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null \
-&& gpg --show-keys --with-fingerprint /etc/apt/trusted.gpg.d/apt.llvm.org.asc | grep '6084 F3CF 814B 57C1 CF12  EFD5 15CF 4D18 AF4F 7421'
+  && gpg --show-keys --with-fingerprint /etc/apt/trusted.gpg.d/apt.llvm.org.asc | grep '6084 F3CF 814B 57C1 CF12  EFD5 15CF 4D18 AF4F 7421'
 # hadolint ignore=DL3059,SC2102 # multi-stage build, more RUN -> better caching
 RUN cat <<EOF > /etc/apt/sources.list.d/llvm-trixie-22.list
 deb [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/trixie/ llvm-toolchain-trixie-22 main

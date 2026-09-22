@@ -87,7 +87,7 @@ jobs:
         uses: cargo-bins/cargo-binstall@b874e25ea559687bec77e281e9b271aa1367b624 # v1.23.0
 
       - name: Install bpf-linker
-        run: command -v bpf-linker &> /dev/null || cargo binstall --disable-telemetry -y bpf-linker
+        run: command -v bpf-linker &> /dev/null || cargo binstall --disable-telemetry -y bpf-linker --force
 
       - name: Build eBPF and userspace code
         run: cargo build -r
@@ -138,7 +138,7 @@ jobs:
         uses: cargo-bins/cargo-binstall@b874e25ea559687bec77e281e9b271aa1367b624 # v1.23.0
 
       - name: Install bpf-linker
-        run: command -v bpf-linker &> /dev/null || cargo binstall --disable-telemetry -y bpf-linker
+        run: command -v bpf-linker &> /dev/null || cargo binstall --disable-telemetry -y bpf-linker --force
 
       - name: Install cargo-nextest
         run: |
