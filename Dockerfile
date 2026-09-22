@@ -24,6 +24,8 @@ RUN cp mermin/Cargo.toml mermin/Cargo.toml.orig \
 # ---- Build Stage ----
 FROM rust:1.96.0-trixie@sha256:a8a5f0a1e5fe7dfe1d352591e4a1c7dd2c08fd70475cae872cf3458ba0df0546 AS base
 
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
 # Since Mermin needs root to be ran, switching to non-root in in the base/builder stages does not improve the security.
 # nosemgrep: dockerfile.security.last-user-is-root.last-user-is-root # root is needed due to eBPF
 USER root
