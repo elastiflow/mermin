@@ -277,7 +277,7 @@ discovery "instrument" {
 
 parser {
   geneve_port = 6081
-  vxlan_port = 4789
+  vxlan_port = 8472  # Linux Flannel; use 4789 for IANA-default VXLAN
   wireguard_port = 51820
 }
 ```

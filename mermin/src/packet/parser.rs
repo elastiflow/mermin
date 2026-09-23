@@ -9,11 +9,13 @@
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
-use mermin_common::{FlowKey, TunnelType, eth::EtherType, ip::IpProto};
+use mermin_common::{FlowKey, TunnelType, eth::EtherType, geneve, ip::IpProto, vxlan};
 
-use crate::packet::types::{
-    FiveTuple, InnerHeaders, IpMetadata, L2Metadata, OuterHeaders, ParseError, ParsedPacket,
-    TunnelInfo,
+use crate::{
+    ip,
+    packet::types::{
+        FiveTuple, InnerHeaders, IpMetadata, OuterHeaders, ParseError, ParsedPacket, TunnelInfo,
+    },
 };
 
 /// Returns true if the flow is likely tunneled. Fast check to avoid deep parsing for plain traffic.
@@ -39,121 +41,47 @@ pub fn is_tunnel(
     }
 }
 
-/// Parse packet data where eBPF has already consumed the outer headers.
-/// For tunnels, `data` starts at the inner Ethernet header.
+/// Parse tunnel UDP payload from eBPF `FlowEvent.packet_data` (VXLAN/Geneve + inner frame).
 pub fn parse_packet_from_offset(
     data: &[u8],
-    _parsed_offset: u16,
+    flow_key: &FlowKey,
+    outer_src_mac: [u8; 6],
+    outer_dst_mac: [u8; 6],
+    vxlan_port: u16,
+    geneve_port: u16,
 ) -> Result<ParsedPacket, ParseError> {
-    parse_packet_deep(data)
-}
+    let (outer_src_ip, outer_dst_ip) =
+        ip::flow_key_to_ip_addrs(flow_key).map_err(|_| ParseError::InvalidHeader)?;
+    let outer_src_port = flow_key.src_port;
+    let outer_dst_port = flow_key.dst_port;
 
-/// Parse packet from raw bytes (up to 256 bytes captured)
-pub fn parse_packet_deep(data: &[u8]) -> Result<ParsedPacket, ParseError> {
     let mut offset = 0;
-
-    let (src_mac, dst_mac, ether_type) = parse_ethernet(data, &mut offset)?;
-
-    let l2_meta = L2Metadata {
-        src_mac,
-        dst_mac,
-        ether_type,
-    };
-
-    let (outer_src_ip, outer_dst_ip, outer_protocol, ip_meta) = match ether_type {
-        EtherType::Ipv4 => parse_ipv4(data, &mut offset)?,
-        EtherType::Ipv6 => parse_ipv6(data, &mut offset)?,
-        _ => return Err(ParseError::UnsupportedEtherType),
-    };
-
-    match outer_protocol {
-        IpProto::Udp => {
-            let (outer_src_port, outer_dst_port) = parse_l4_ports(data, offset)?;
-
-            if outer_dst_port == 4789 || outer_src_port == 4789 {
-                return parse_vxlan(
-                    data,
-                    &mut offset,
-                    outer_src_ip,
-                    outer_dst_ip,
-                    outer_src_port,
-                    outer_dst_port,
-                    src_mac,
-                    dst_mac,
-                );
-            } else if outer_dst_port == 6081 || outer_src_port == 6081 {
-                return parse_geneve(
-                    data,
-                    &mut offset,
-                    outer_src_ip,
-                    outer_dst_ip,
-                    outer_src_port,
-                    outer_dst_port,
-                    src_mac,
-                    dst_mac,
-                );
-            }
-
-            Ok(ParsedPacket::Direct {
-                five_tuple: FiveTuple {
-                    src_ip: outer_src_ip,
-                    dst_ip: outer_dst_ip,
-                    src_port: outer_src_port,
-                    dst_port: outer_dst_port,
-                    protocol: IpProto::Udp,
-                    ip_version: if outer_src_ip.is_ipv4() { 4 } else { 6 },
-                },
-                l2_metadata: l2_meta,
-                ip_metadata: ip_meta,
-            })
-        }
-        IpProto::Tcp => {
-            let (src_port, dst_port) = parse_l4_ports(data, offset)?;
-            Ok(ParsedPacket::Direct {
-                five_tuple: FiveTuple {
-                    src_ip: outer_src_ip,
-                    dst_ip: outer_dst_ip,
-                    src_port,
-                    dst_port,
-                    protocol: IpProto::Tcp,
-                    ip_version: if outer_src_ip.is_ipv4() { 4 } else { 6 },
-                },
-                l2_metadata: l2_meta,
-                ip_metadata: ip_meta,
-            })
-        }
-        IpProto::Icmp => {
-            let (type_code, _) = parse_icmp_type_code(data, offset)?;
-            Ok(ParsedPacket::Direct {
-                five_tuple: FiveTuple {
-                    src_ip: outer_src_ip,
-                    dst_ip: outer_dst_ip,
-                    src_port: type_code,
-                    dst_port: 0,
-                    protocol: outer_protocol,
-                    ip_version: if outer_src_ip.is_ipv4() { 4 } else { 6 },
-                },
-                l2_metadata: l2_meta,
-                ip_metadata: ip_meta,
-            })
-        }
-        IpProto::Gre => {
-            // TODO: GRE parsing
-            Err(ParseError::UnsupportedProtocol)
-        }
-        _ => Ok(ParsedPacket::Direct {
-            five_tuple: FiveTuple {
-                src_ip: outer_src_ip,
-                dst_ip: outer_dst_ip,
-                src_port: 0,
-                dst_port: 0,
-                protocol: outer_protocol,
-                ip_version: if outer_src_ip.is_ipv4() { 4 } else { 6 },
-            },
-            l2_metadata: l2_meta,
-            ip_metadata: ip_meta,
-        }),
+    if outer_src_port == vxlan_port || outer_dst_port == vxlan_port {
+        return parse_vxlan_payload(
+            data,
+            &mut offset,
+            outer_src_ip,
+            outer_dst_ip,
+            outer_src_port,
+            outer_dst_port,
+            outer_src_mac,
+            outer_dst_mac,
+        );
     }
+    if outer_src_port == geneve_port || outer_dst_port == geneve_port {
+        return parse_geneve_payload(
+            data,
+            &mut offset,
+            outer_src_ip,
+            outer_dst_ip,
+            outer_src_port,
+            outer_dst_port,
+            outer_src_mac,
+            outer_dst_mac,
+        );
+    }
+
+    Err(ParseError::UnsupportedProtocol)
 }
 
 fn parse_ethernet(
@@ -170,7 +98,8 @@ fn parse_ethernet(
     src_mac.copy_from_slice(&data[*offset + 6..*offset + 12]);
 
     let ether_type_raw = u16::from_be_bytes([data[*offset + 12], data[*offset + 13]]);
-    let ether_type = EtherType::try_from(ether_type_raw).unwrap_or(EtherType::Reserved);
+    // EtherType::try_from expects the same encoding used by the enum repr (see mermin-common eth tests).
+    let ether_type = EtherType::try_from(ether_type_raw.to_be()).unwrap_or(EtherType::Reserved);
 
     *offset += 14;
     Ok((src_mac, dst_mac, ether_type))
@@ -297,7 +226,7 @@ fn parse_icmp_type_code(data: &[u8], offset: usize) -> Result<(u16, u16), ParseE
 }
 
 #[allow(clippy::too_many_arguments)]
-fn parse_vxlan(
+fn parse_vxlan_payload(
     data: &[u8],
     offset: &mut usize,
     outer_src_ip: IpAddr,
@@ -307,15 +236,13 @@ fn parse_vxlan(
     outer_src_mac: [u8; 6],
     outer_dst_mac: [u8; 6],
 ) -> Result<ParsedPacket, ParseError> {
-    *offset += 8; // skip UDP header
-
-    // VXLAN header (8 bytes): flags(1) + reserved(3) + VNI(3) + reserved(1)
-    if data.len() < *offset + 8 {
+    if data.len() < *offset + vxlan::VXLAN_LEN {
         return Err(ParseError::TooShort);
     }
 
-    let vni = u32::from_be_bytes([0, data[*offset + 4], data[*offset + 5], data[*offset + 6]]);
-    *offset += 8;
+    let vni_bytes: vxlan::Vni = [data[*offset + 4], data[*offset + 5], data[*offset + 6]];
+    let vni = vxlan::vni(vni_bytes);
+    *offset += vxlan::VXLAN_LEN;
 
     let (inner_src_mac, inner_dst_mac, inner_ether_type) = parse_ethernet(data, offset)?;
 
@@ -361,7 +288,7 @@ fn parse_vxlan(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn parse_geneve(
+fn parse_geneve_payload(
     data: &[u8],
     offset: &mut usize,
     outer_src_ip: IpAddr,
@@ -371,16 +298,18 @@ fn parse_geneve(
     outer_src_mac: [u8; 6],
     outer_dst_mac: [u8; 6],
 ) -> Result<ParsedPacket, ParseError> {
-    *offset += 8; // skip UDP header
-
-    // Geneve header (8+ bytes): ver/opt_len(1) + flags(1) + protocol(2) + VNI(3) + reserved(1)
-    if data.len() < *offset + 8 {
+    if data.len() <= *offset {
         return Err(ParseError::TooShort);
     }
 
-    let opt_len = (data[*offset] & 0x3F) as usize * 4; // options length in bytes
-    let vni = u32::from_be_bytes([0, data[*offset + 4], data[*offset + 5], data[*offset + 6]]);
-    *offset += 8 + opt_len;
+    let hdr_len = geneve::total_hdr_len(data[*offset]);
+    if data.len() < *offset + hdr_len {
+        return Err(ParseError::TooShort);
+    }
+
+    let vni_bytes: geneve::Vni = [data[*offset + 4], data[*offset + 5], data[*offset + 6]];
+    let vni = geneve::vni(vni_bytes);
+    *offset += hdr_len;
 
     let (inner_src_mac, inner_dst_mac, inner_ether_type) = parse_ethernet(data, offset)?;
 
@@ -423,4 +352,166 @@ fn parse_geneve(
             vni,
         },
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::{IpAddr, Ipv4Addr};
+
+    use mermin_common::{FlowKey, IpVersion, ip::IpProto};
+
+    use super::*;
+
+    fn outer_flow_key(src_port: u16, dst_port: u16) -> FlowKey {
+        FlowKey {
+            src_ip: [10, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            dst_ip: [10, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            src_port,
+            dst_port,
+            ip_version: IpVersion::V4,
+            protocol: IpProto::Udp,
+        }
+    }
+
+    fn build_vxlan_icmp_payload(vni: u32) -> Vec<u8> {
+        let mut pkt = Vec::new();
+        // VXLAN header
+        pkt.extend_from_slice(&[0x08, 0x00, 0x00, 0x00]);
+        pkt.push(((vni >> 16) & 0xFF) as u8);
+        pkt.push(((vni >> 8) & 0xFF) as u8);
+        pkt.push((vni & 0xFF) as u8);
+        pkt.push(0x00);
+        // Inner Ethernet
+        pkt.extend_from_slice(&[0x01, 0x02, 0x03, 0x04, 0x05, 0x06]); // dst
+        pkt.extend_from_slice(&[0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]); // src
+        pkt.extend_from_slice(&[0x08, 0x00]); // IPv4
+        // Inner IPv4: 10.244.1.1 -> 10.244.2.2, ICMP
+        pkt.extend_from_slice(&[
+            0x45, 0x00, 0x00, 0x1c, 0x00, 0x00, 0x40, 0x00, 0x40, 0x01, 0x00, 0x00, 0x0a, 0xf4,
+            0x01, 0x01, 0x0a, 0xf4, 0x02, 0x02,
+        ]);
+        // Inner ICMP echo request (type 8, code 0)
+        pkt.extend_from_slice(&[0x08, 0x00, 0x00, 0x00, 0x00, 0x00]);
+        pkt
+    }
+
+    fn build_geneve_payload(vni: u32, opt_len_quads: u8) -> Vec<u8> {
+        let mut pkt = Vec::new();
+        pkt.push(opt_len_quads);
+        pkt.extend_from_slice(&[0x00, 0x08, 0x00]); // flags + IPv4 ethertype
+        pkt.push(((vni >> 16) & 0xFF) as u8);
+        pkt.push(((vni >> 8) & 0xFF) as u8);
+        pkt.push((vni & 0xFF) as u8);
+        pkt.push(0x00);
+        for i in 0..(opt_len_quads as usize * 4) {
+            pkt.push(i as u8);
+        }
+        // Inner Ethernet + IPv4 UDP
+        pkt.extend_from_slice(&[0x01, 0x02, 0x03, 0x04, 0x05, 0x06]);
+        pkt.extend_from_slice(&[0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]);
+        pkt.extend_from_slice(&[0x08, 0x00]);
+        pkt.extend_from_slice(&[
+            0x45, 0x00, 0x00, 0x1c, 0x00, 0x00, 0x40, 0x00, 0x40, 0x11, 0x00, 0x00, 0x0a, 0xf4,
+            0x01, 0x01, 0x0a, 0xf4, 0x02, 0x02,
+        ]);
+        pkt.extend_from_slice(&[0x30, 0x39, 0x00, 0x50, 0x00, 0x08, 0x00, 0x00]); // UDP 12345->80
+        pkt
+    }
+
+    #[test]
+    fn test_parse_vxlan_icmp_from_udp_payload() {
+        let payload = build_vxlan_icmp_payload(0x123456);
+        let flow_key = outer_flow_key(54321, 4789);
+        let parsed = parse_packet_from_offset(&payload, &flow_key, [0; 6], [0; 6], 4789, 6081)
+            .expect("parse vxlan");
+
+        match parsed {
+            ParsedPacket::Tunneled {
+                inner, tunnel_info, ..
+            } => {
+                assert_eq!(tunnel_info.tunnel_type, TunnelType::Vxlan);
+                assert_eq!(tunnel_info.vni, 0x123456);
+                assert_eq!(inner.src_ip, IpAddr::V4(Ipv4Addr::new(10, 244, 1, 1)));
+                assert_eq!(inner.dst_ip, IpAddr::V4(Ipv4Addr::new(10, 244, 2, 2)));
+                assert_eq!(inner.protocol, IpProto::Icmp);
+                assert_eq!(inner.src_port, (8 << 8) | 0);
+            }
+            ParsedPacket::Direct { .. } => panic!("expected tunneled packet"),
+        }
+    }
+
+    #[test]
+    fn test_parse_vxlan_non_default_port() {
+        let payload = build_vxlan_icmp_payload(42);
+        let flow_key = outer_flow_key(12345, 8472);
+        let parsed = parse_packet_from_offset(&payload, &flow_key, [0; 6], [0; 6], 8472, 6081)
+            .expect("parse flannel vxlan");
+
+        match parsed {
+            ParsedPacket::Tunneled { tunnel_info, .. } => {
+                assert_eq!(tunnel_info.tunnel_type, TunnelType::Vxlan);
+                assert_eq!(tunnel_info.vni, 42);
+            }
+            ParsedPacket::Direct { .. } => panic!("expected tunneled packet"),
+        }
+    }
+
+    #[test]
+    fn test_parse_geneve_default_options() {
+        let payload = build_geneve_payload(0x00ABCD, 0);
+        let flow_key = outer_flow_key(54321, 6081);
+        let parsed = parse_packet_from_offset(&payload, &flow_key, [0; 6], [0; 6], 4789, 6081)
+            .expect("parse geneve");
+
+        match parsed {
+            ParsedPacket::Tunneled {
+                inner, tunnel_info, ..
+            } => {
+                assert_eq!(tunnel_info.tunnel_type, TunnelType::Geneve);
+                assert_eq!(tunnel_info.vni, 0x00ABCD);
+                assert_eq!(inner.protocol, IpProto::Udp);
+                assert_eq!(inner.src_port, 12345);
+                assert_eq!(inner.dst_port, 80);
+            }
+            ParsedPacket::Direct { .. } => panic!("expected tunneled packet"),
+        }
+    }
+
+    #[test]
+    fn test_parse_geneve_with_options() {
+        let payload = build_geneve_payload(99, 1);
+        let flow_key = outer_flow_key(6081, 54321);
+        let parsed = parse_packet_from_offset(&payload, &flow_key, [0; 6], [0; 6], 4789, 6081)
+            .expect("parse geneve with options");
+
+        match parsed {
+            ParsedPacket::Tunneled { tunnel_info, .. } => {
+                assert_eq!(tunnel_info.tunnel_type, TunnelType::Geneve);
+                assert_eq!(tunnel_info.vni, 99);
+            }
+            ParsedPacket::Direct { .. } => panic!("expected tunneled packet"),
+        }
+    }
+
+    #[test]
+    fn test_parse_truncated_payload() {
+        let payload = vec![0x08, 0x00, 0x00, 0x00];
+        let flow_key = outer_flow_key(54321, 4789);
+        let err =
+            parse_packet_from_offset(&payload, &flow_key, [0; 6], [0; 6], 4789, 6081).unwrap_err();
+        assert_eq!(err, ParseError::TooShort);
+    }
+
+    #[test]
+    fn test_is_tunnel_port_match() {
+        let flow_key = outer_flow_key(8472, 54321);
+        assert!(is_tunnel(&flow_key, 8472, 6081, 51820));
+        let direct = FlowKey {
+            src_port: 12345,
+            dst_port: 80,
+            protocol: IpProto::Udp,
+            ..outer_flow_key(0, 0)
+        };
+        assert!(!is_tunnel(&direct, 4789, 6081, 51820));
+    }
 }
