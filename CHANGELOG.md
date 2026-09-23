@@ -1,3 +1,16 @@
+## [v0.5.0] - 2026-09-23
+
+### Bug Fixes
+
+- **deps:** Update docker (#604)
+### Features
+
+- Bump LLVM to v22 (#603)
+
+[v0.4.2..v0.5.0](https://github.com/elastiflow/mermin/compare/v0.4.2...v0.5.0)
+
+
+
 ## [v0.4.2] - 2026-09-21
 
 ### Bug Fixes
