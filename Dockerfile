@@ -24,6 +24,8 @@ RUN cp mermin/Cargo.toml mermin/Cargo.toml.orig \
 # ---- Build Stage ----
 FROM rust:1.96.0-trixie@sha256:a8a5f0a1e5fe7dfe1d352591e4a1c7dd2c08fd70475cae872cf3458ba0df0546 AS base
 
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
 # Since Mermin needs root to be ran, switching to non-root in in the base/builder stages does not improve the security.
 # nosemgrep: dockerfile.security.last-user-is-root.last-user-is-root # root is needed due to eBPF
 USER root
@@ -60,20 +62,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN useradd --create-home --shell /bin/bash poseidon \
     && echo "poseidon ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/poseidon
 
-# Install LLVM
-# Workaround for LLVM signing issue, https://github.com/llvm/llvm-project/issues/153385#issuecomment-3239875987
+# Install LLVM - https://apt.llvm.org/
 # hadolint ignore=DL3059 # multi-stage build, more RUN -> better caching
-RUN sed -i 's/sha1.second_preimage_resistance = 2026-02-01/sha1.second_preimage_resistance = 2026-04-01/' /usr/share/apt/default-sequoia.config
-# hadolint ignore=DL3059 # multi-stage build, more RUN -> better caching
-RUN wget -q https://apt.llvm.org/llvm.sh -O /tmp/llvm.sh && chmod +x /tmp/llvm.sh \
-    && /tmp/llvm.sh 20
+RUN wget --progress=dot:giga -O /etc/apt/trusted.gpg.d/apt.llvm.org.asc https://apt.llvm.org/llvm-snapshot.gpg.key \
+  && gpg --show-keys --with-fingerprint /etc/apt/trusted.gpg.d/apt.llvm.org.asc | grep '6084 F3CF 814B 57C1 CF12  EFD5 15CF 4D18 AF4F 7421'
+# hadolint ignore=DL3059,SC2102 # multi-stage build, more RUN -> better caching
+RUN cat <<EOF > /etc/apt/sources.list.d/llvm-trixie-22.list
+deb [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/trixie/ llvm-toolchain-trixie-22 main
+deb-src [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/trixie/ llvm-toolchain-trixie-22 main
+EOF
+
+# hadolint ignore=DL3059,DL3008,DL3009 # multi-stage build, more RUN -> better caching
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    llvm-22-dev \
+    libclang-22-dev
 
 # Install eBPF Dependencies
-# hadolint ignore=DL3059,DL3008 # multi-stage build, more RUN -> better caching, not pinning versions for now
+# hadolint ignore=DL3059,DL3008,DL3009 # multi-stage build, more RUN -> better caching, not pinning versions for now
 RUN apt-get install -y --no-install-recommends \
     iputils-ping \
-    libclang-20-dev \
-    llvm-20-dev \
     libelf-dev \
     zlib1g-dev \
     libzstd-dev \

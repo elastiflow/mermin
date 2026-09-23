@@ -67,16 +67,26 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
+      - name: Add LLVM repo
+        run: |
+          sudo wget --progress=dot:giga -O /etc/apt/trusted.gpg.d/apt.llvm.org.asc https://apt.llvm.org/llvm-snapshot.gpg.key
+          gpg --show-keys --with-fingerprint /etc/apt/trusted.gpg.d/apt.llvm.org.asc | grep '6084 F3CF 814B 57C1 CF12  EFD5 15CF 4D18 AF4F 7421'
+
+          sudo cat <<EOF | sudo tee /etc/apt/sources.list.d/llvm-22.list
+          deb [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main
+          deb-src [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main
+          EOF
+
       - name: Install eBPF dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang llvm libelf-dev libz-dev linux-headers-$(uname -r)
+          sudo apt-get install -y --no-install-recommends llvm-22-dev libclang-22-dev libelf-dev libz-dev make
 
       - name: Install cargo-binstall
         uses: cargo-bins/cargo-binstall@b874e25ea559687bec77e281e9b271aa1367b624 # v1.23.0
 
       - name: Install bpf-linker
-        run: command -v bpf-linker &> /dev/null || cargo binstall --disable-telemetry -y bpf-linker
+        run: command -v bpf-linker &> /dev/null || cargo binstall --disable-telemetry -y bpf-linker --force
 
       - name: Build eBPF and userspace code
         run: cargo build -r
@@ -106,16 +116,27 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Add LLVM repo
+        run: |
+          sudo wget --progress=dot:giga -O /etc/apt/trusted.gpg.d/apt.llvm.org.asc https://apt.llvm.org/llvm-snapshot.gpg.key
+          gpg --show-keys --with-fingerprint /etc/apt/trusted.gpg.d/apt.llvm.org.asc | grep '6084 F3CF 814B 57C1 CF12  EFD5 15CF 4D18 AF4F 7421'
+
+          sudo cat <<EOF | sudo tee /etc/apt/sources.list.d/llvm-22.list
+          deb [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main
+          deb-src [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main
+          EOF
+
       - name: Install eBPF dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang llvm libelf-dev libz-dev make
+          sudo apt-get install -y --no-install-recommends llvm-22-dev libclang-22-dev libelf-dev libz-dev make
 
       - name: Install cargo-binstall
         uses: cargo-bins/cargo-binstall@b874e25ea559687bec77e281e9b271aa1367b624 # v1.23.0
 
       - name: Install bpf-linker
-        run: command -v bpf-linker &> /dev/null || cargo binstall --disable-telemetry -y bpf-linker
+        run: command -v bpf-linker &> /dev/null || cargo binstall --disable-telemetry -y bpf-linker --force
 
       - name: Install cargo-nextest
         run: |
