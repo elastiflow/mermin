@@ -3,7 +3,10 @@ use std::{any::Any, borrow::Cow, sync::Arc, time::SystemTime};
 use async_trait::async_trait;
 use opentelemetry::{
     InstrumentationScope,
-    trace::{SpanKind, TraceId, Tracer, TracerProvider},
+    trace::{
+        SpanContext, SpanId, SpanKind, TraceContextExt, TraceFlags, TraceId, TraceState, Tracer,
+        TracerProvider,
+    },
 };
 use opentelemetry_sdk::{error::OTelSdkResult, trace::SdkTracerProvider};
 
@@ -68,14 +71,25 @@ impl TraceableExporter for TraceExporterAdapter {
         let tracer = &self.tracer;
         let name = traceable.name().unwrap_or(Cow::Borrowed("flow"));
 
-        let mut builder = tracer
+        let builder = tracer
             .span_builder(name)
             .with_kind(traceable.span_kind())
             .with_start_time(traceable.start_time());
-        if let Some(trace_id) = traceable.trace_id() {
-            builder = builder.with_trace_id(trace_id);
-        }
-        let mut span = builder.start_with_context(tracer, &opentelemetry::Context::new());
+        // SpanBuilder no longer accepts a trace id. A remote parent with an
+        // invalid span id keeps this a root span and still fixes the trace id.
+        let parent_cx = match traceable.trace_id() {
+            Some(trace_id) => {
+                opentelemetry::Context::new().with_remote_span_context(SpanContext::new(
+                    trace_id,
+                    SpanId::INVALID,
+                    TraceFlags::SAMPLED,
+                    true,
+                    TraceState::default(),
+                ))
+            }
+            None => opentelemetry::Context::new(),
+        };
+        let mut span = builder.start_with_context(tracer, &parent_cx);
         span = traceable.record(span);
         opentelemetry::trace::Span::end_with_timestamp(&mut span, traceable.end_time());
     }

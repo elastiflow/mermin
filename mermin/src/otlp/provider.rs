@@ -357,7 +357,7 @@ impl ProviderBuilder {
         let http_client = match tls_config {
             None => reqwest::Client::builder().build(),
             Some(tls_config) => reqwest::Client::builder()
-                .use_preconfigured_tls(tls_config.clone())
+                .tls_backend_preconfigured(tls_config.clone())
                 .build(),
         }
         .map_err(|e| {
