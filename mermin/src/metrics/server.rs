@@ -245,19 +245,14 @@ async fn metrics_summary_handler(debug_enabled: bool) -> impl IntoResponse {
                     if m.get_label().is_empty() {
                         return None;
                     }
-                    Some(
-                        m.get_label()
-                            .iter()
-                            .map(|l| l.get_name().to_string())
-                            .collect(),
-                    )
+                    Some(m.get_label().iter().map(|l| l.name().to_string()).collect())
                 })
                 .unwrap_or_default();
 
             standard_metrics.push(MetricSummary {
-                name: family.get_name().to_string(),
+                name: family.name().to_string(),
                 r#type: metric_type.to_string(),
-                description: family.get_help().to_string(),
+                description: family.help().to_string(),
                 labels,
                 category: "standard".to_string(),
             });
@@ -281,20 +276,15 @@ async fn metrics_summary_handler(debug_enabled: bool) -> impl IntoResponse {
                         if m.get_label().is_empty() {
                             None
                         } else {
-                            Some(
-                                m.get_label()
-                                    .iter()
-                                    .map(|l| l.get_name().to_string())
-                                    .collect(),
-                            )
+                            Some(m.get_label().iter().map(|l| l.name().to_string()).collect())
                         }
                     })
                     .unwrap_or_default();
 
                 debug_metrics.push(MetricSummary {
-                    name: family.get_name().to_string(),
+                    name: family.name().to_string(),
                     r#type: metric_type.to_string(),
-                    description: family.get_help().to_string(),
+                    description: family.help().to_string(),
                     labels,
                     category: "debug".to_string(),
                 });

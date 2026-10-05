@@ -63,7 +63,7 @@ where
         self.inner.set_resource(resource);
     }
 
-    fn shutdown(&mut self) -> Result<(), OTelSdkError> {
+    fn shutdown(&self) -> Result<(), OTelSdkError> {
         self.inner.shutdown()
     }
 }
