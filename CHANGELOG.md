@@ -1,3 +1,14 @@
+## [v0.5.1] - 2026-10-05
+
+### Bug Fixes
+
+- **security:** Fix 39 security issues in aws-lc-sys, zerovec-derive, zerovec and 22 more (#612)
+- **deps:** Update github actions (major) (#608)
+
+[v0.5.0..v0.5.1](https://github.com/elastiflow/mermin/compare/v0.5.0...v0.5.1)
+
+
+
 ## [v0.5.0] - 2026-09-23
 
 ### Bug Fixes
