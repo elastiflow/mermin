@@ -22,7 +22,7 @@ RUN cp mermin/Cargo.toml mermin/Cargo.toml.orig \
     | tr '\r' '\n' > Cargo.lock
 
 # ---- Build Stage ----
-FROM rust:1.96.0-trixie@sha256:a8a5f0a1e5fe7dfe1d352591e4a1c7dd2c08fd70475cae872cf3458ba0df0546 AS base
+FROM rust:1.96.0-trixie@sha256:3745c050d12adc738eff16ebfc81ed044bfb2cc27c6828850ff1666beb1c7a49 AS base
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
@@ -143,7 +143,7 @@ RUN cargo build --release
 # Use a distroless base image for the final container without shell support, to get sha run:
 #   skopeo inspect --override-os=linux --override-arch=amd64 --format "Name: {{.Name}} Digest: {{.Digest}}" docker://gcr.io/distroless/cc-debian13:latest
 # hadolint ignore=DL3006 # gcr.io/distroless/cc-debian12 don't have tags
-FROM gcr.io/distroless/cc-debian13@sha256:4594d59540d1948417f6ca2829ddd9294493a7c68b7528f4dd459de7f203a750 AS runner
+FROM gcr.io/distroless/cc-debian13@sha256:159783207c2cd44c2aa5715961d13c8612368ac9bd450f887e3f08fc8ea461e3 AS runner
 ARG APP_ROOT APP
 
 COPY --from=builder ${APP_ROOT}/target/release/${APP} /usr/bin/${APP}
