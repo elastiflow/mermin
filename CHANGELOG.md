@@ -1,3 +1,14 @@
+## [v0.5.2] - 2026-10-06
+
+### Bug Fixes
+
+- **deps:** Update docker (#614)
+- **deps:** Update github actions (#615)
+
+[v0.5.1..v0.5.2](https://github.com/elastiflow/mermin/compare/v0.5.1...v0.5.2)
+
+
+
 ## [v0.5.1] - 2026-10-05
 
 ### Bug Fixes
