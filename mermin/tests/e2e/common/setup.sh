@@ -39,7 +39,11 @@ install_cilium() {
     sudo tar -C /usr/local/bin -xzvf "cilium-${OS}-${ARCH}.tar.gz"
     rm "cilium-${OS}-${ARCH}.tar.gz"{,.sha256sum}
   fi
-  cilium install --wait
+  cilium install --wait \
+    --set image.pullPolicy=IfNotPresent \
+    --set ipam.mode=kubernetes
+  kubectl rollout status daemonset/cilium -n kube-system --timeout=5m
+  kubectl rollout status daemonset/cilium-envoy -n kube-system --timeout=5m
 }
 
 
