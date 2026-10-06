@@ -9,6 +9,7 @@
       "matchManagers": ["github-actions"],
       "matchDepNames": ["rust"],
       "matchDepTypes": ["uses-with"],
+      "minimumReleaseAge": "7 days",
       "enabled": false
     }
   ]
