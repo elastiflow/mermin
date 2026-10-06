@@ -2,5 +2,14 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "local>elastiflow/renovate-config"
+  ],
+  "packageRules": [
+    {
+      "description": "CI takes the nightly from rust-toolchain.toml. A uses-with bump installs a different nightly than the eBPF build script.",
+      "matchManagers": ["github-actions"],
+      "matchDepNames": ["rust"],
+      "matchDepTypes": ["uses-with"],
+      "enabled": false
+    }
   ]
 }

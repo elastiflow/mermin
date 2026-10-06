@@ -27,8 +27,8 @@ FROM rust:1.96.0-trixie@sha256:3745c050d12adc738eff16ebfc81ed044bfb2cc27c6828850
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # Since Mermin needs root to be ran, switching to non-root in in the base/builder stages does not improve the security.
-# nosemgrep: dockerfile.security.last-user-is-root.last-user-is-root # root is needed due to eBPF
-USER root
+# nosemgrep: dockerfile.security.last-user-is-root.last-user-is-root # root is needed due to eBPF (uid 0 for DL3066)
+USER 0
 
 # Install Dev Container essentials
 # hadolint ignore=DL3059,DL3008 # multi-stage build, more RUN -> better caching, not pinning versions for now
@@ -116,8 +116,8 @@ FROM base AS builder
 ARG APP_ROOT APP
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-# hadolint ignore=DL3002 # root is needed due to eBPF
-USER root
+# hadolint ignore=DL3002 # root is needed due to eBPF (uid 0 for DL3066)
+USER 0
 
 WORKDIR ${APP_ROOT}
 
