@@ -1,3 +1,14 @@
+## [mermin-netobserv-os-stack-0.3.8] - 2026-10-06
+
+### Bug Fixes
+
+- **deps:** Update helm release mermin to >= 0.5.2
+- **deps:** Update helm release netobserv-flow to >= 0.12.0 (#617)
+
+[mermin-netobserv-os-stack-0.3.7..mermin-netobserv-os-stack-0.3.8](https://github.com/elastiflow/mermin/compare/mermin-netobserv-os-stack-0.3.7...mermin-netobserv-os-stack-0.3.8)
+
+
+
 ## [mermin-netobserv-os-stack-0.3.7] - 2026-10-05
 
 ### Bug Fixes
