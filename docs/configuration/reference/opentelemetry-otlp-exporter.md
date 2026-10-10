@@ -327,7 +327,7 @@ Configure HTTP Basic authentication for the OTLP endpoint.
 
 - `pass` attribute
 
-  Password for basic authentication. Supports environment variable interpolation via `env(VAR_NAME)`.
+  Password for basic authentication. Supports environment variable interpolation via `env("VAR_NAME")` in HCL or `${VAR_NAME}` in YAML.
 
   **Type:** String
 
@@ -365,11 +365,21 @@ Configure HTTP Basic authentication for the OTLP endpoint.
         auth = {
           basic = {
             user = "mermin"
-            pass = env(OTLP_PASSWORD)
+            pass = env("OTLP_PASSWORD")
           }
         }
       }
     }
+    ```
+
+    ```yaml
+    export:
+      traces:
+        otlp:
+          auth:
+            basic:
+              user: mermin
+              pass: "${OTLP_PASSWORD}"
     ```
 
   - Using Kubernetes Secrets
@@ -637,7 +647,7 @@ export "traces" {
     auth = {
       basic = {
         user = "mermin"
-        pass = env(OTLP_PASSWORD)
+        pass = env("OTLP_PASSWORD")
       }
     }
 
