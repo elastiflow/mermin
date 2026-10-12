@@ -1,3 +1,13 @@
+## [v0.5.3] - 2026-10-12
+
+### Bug Fixes
+
+- **security:** Fix 4 security issues in quinn-proto, jsonptr, rand (#619)
+
+[v0.5.2..v0.5.3](https://github.com/elastiflow/mermin/compare/v0.5.2...v0.5.3)
+
+
+
 ## [v0.5.2] - 2026-10-06
 
 ### Bug Fixes
