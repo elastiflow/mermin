@@ -218,11 +218,8 @@ fn parse_icmp_type_code(data: &[u8], offset: usize) -> Result<(u16, u16), ParseE
     if data.len() < offset + 2 {
         return Err(ParseError::TooShort);
     }
-    let icmp_type = data[offset] as u16;
-    let icmp_code = data[offset + 1] as u16;
-    // Encode as port field: (type << 8 | code)
-    let type_code_port = (icmp_type << 8) | icmp_code;
-    Ok((type_code_port, 0))
+    // Same encoding as the eBPF FlowKey (src_port = type, dst_port = code) so community IDs match.
+    Ok((data[offset] as u16, data[offset + 1] as u16))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -254,7 +251,7 @@ fn parse_vxlan_payload(
 
     let (inner_src_port, inner_dst_port) = match inner_protocol {
         IpProto::Tcp | IpProto::Udp => parse_l4_ports(data, *offset)?,
-        IpProto::Icmp => parse_icmp_type_code(data, *offset)?,
+        IpProto::Icmp | IpProto::Ipv6Icmp => parse_icmp_type_code(data, *offset)?,
         _ => (0, 0),
     };
 
@@ -321,7 +318,7 @@ fn parse_geneve_payload(
 
     let (inner_src_port, inner_dst_port) = match inner_protocol {
         IpProto::Tcp | IpProto::Udp => parse_l4_ports(data, *offset)?,
-        IpProto::Icmp => parse_icmp_type_code(data, *offset)?,
+        IpProto::Icmp | IpProto::Ipv6Icmp => parse_icmp_type_code(data, *offset)?,
         _ => (0, 0),
     };
 
@@ -434,7 +431,8 @@ mod tests {
                 assert_eq!(inner.src_ip, IpAddr::V4(Ipv4Addr::new(10, 244, 1, 1)));
                 assert_eq!(inner.dst_ip, IpAddr::V4(Ipv4Addr::new(10, 244, 2, 2)));
                 assert_eq!(inner.protocol, IpProto::Icmp);
-                assert_eq!(inner.src_port, (8 << 8) | 0);
+                assert_eq!(inner.src_port, 8);
+                assert_eq!(inner.dst_port, 0);
             }
             ParsedPacket::Direct { .. } => panic!("expected tunneled packet"),
         }

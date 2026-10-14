@@ -270,7 +270,7 @@ Default:
 **Use cases**: Fine-tuning for specific CNI setups, reducing monitored interface count
 
 {% hint style="info" %}
-Mermin's goal is to show you pod-to-pod traffic. Use `veth*` for same-node traffic and tunnel interfaces (`flannel*`, `tunl*`, `vxlan*`) or node uplinks (`eth*`) for inter-node overlay traffic. VXLAN and Geneve encapsulation is parsed automatically; set `parser.vxlan_port` to match your CNI (Linux Flannel uses `8472`, not the IANA default `4789`).
+Mermin's goal is to show you pod-to-pod traffic. Use `veth*` for same-node traffic and tunnel interfaces (`flannel*`, `tunl*`, `vxlan*`) or node uplinks (`eth*`) for inter-node overlay traffic. Mermin parses VXLAN and Geneve encapsulation automatically. Set `parser.vxlan_port` to match your CNI. Linux Flannel uses `8472` instead of the IANA default `4789`.
 {% endhint %}
 
 **Physical Interfaces Only:**

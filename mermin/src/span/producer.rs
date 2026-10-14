@@ -918,6 +918,13 @@ impl FlowWorker {
             return Ok(());
         };
 
+        // Outer stats are UDP. Copy the inner ICMP type/code before normalization can swap the ports.
+        let mut stats = stats;
+        if matches!(inner.protocol, IpProto::Icmp | IpProto::Ipv6Icmp) {
+            stats.icmp_type = inner.src_port as u8;
+            stats.icmp_code = inner.dst_port as u8;
+        }
+
         let inner_key = flow_key_from_inner_headers(&inner);
         let (src_addr, dst_addr) = flow_key_to_ip_addrs(&inner_key)?;
         let community_id: Arc<str> = self
@@ -930,6 +937,14 @@ impl FlowWorker {
                 inner_key.protocol,
             )
             .into();
+
+        // The reverse direction has its own outer UDP key, so keep the span that already tracks this flow.
+        if self.flow_store.contains_key(community_id.as_ref()) {
+            self.remove_ebpf_map_entry(&self.flow_stats_map, &event.flow_key)
+                .await;
+            guard.keep();
+            return Ok(());
+        }
 
         let outer_tunnel = Some(OuterTunnel {
             key: event.flow_key,
@@ -988,6 +1003,8 @@ impl FlowWorker {
         let is_tcp = transport == IpProto::Tcp;
         let is_icmp = transport == IpProto::Icmp;
         let is_icmpv6 = transport == IpProto::Ipv6Icmp;
+        // Tunneled spans only see the first inner packet, so there is no reverse ICMP type to report.
+        let has_reverse_icmp = (is_icmp || is_icmpv6) && outer_tunnel.is_none();
         let start_time_nanos = stats.first_seen_ns + self.boot_time_offset_nanos;
         let end_time_nanos = stats.last_seen_ns + self.boot_time_offset_nanos;
         let iface_name: Option<Arc<str>> = self
@@ -996,19 +1013,6 @@ impl FlowWorker {
             .get(&stats.ifindex)
             .map(|s| Arc::from(s.as_str()));
         let (src_addr, dst_addr) = flow_key_to_ip_addrs(flow_key)?;
-        let (icmp_type, icmp_code) = if outer_tunnel.is_some() && (is_icmp || is_icmpv6) {
-            (
-                (flow_key.src_port >> 8) as u8,
-                (flow_key.src_port & 0xff) as u8,
-            )
-        } else {
-            (stats.icmp_type, stats.icmp_code)
-        };
-        let (reverse_icmp_type, reverse_icmp_code) = if outer_tunnel.is_some() {
-            (0, 0)
-        } else {
-            (stats.reverse_icmp_type, stats.reverse_icmp_code)
-        };
 
         let outer_tunnel_addrs = match &outer_tunnel {
             Some(tunnel) => Some(flow_key_to_ip_addrs(&tunnel.key)?),
@@ -1122,18 +1126,27 @@ impl FlowWorker {
                     Arc::from(lossy.trim_end_matches('\0'))
                 }),
 
-                flow_icmp_type_id: (is_icmp || is_icmpv6).then_some(icmp_type),
-                flow_icmp_type_name: icmp_type_name(is_icmp, is_icmpv6, icmp_type),
-                flow_icmp_code_id: (is_icmp || is_icmpv6).then_some(icmp_code),
-                flow_icmp_code_name: icmp_code_name(is_icmp, is_icmpv6, icmp_type, icmp_code),
-                flow_reverse_icmp_type_id: (is_icmp || is_icmpv6).then_some(reverse_icmp_type),
-                flow_reverse_icmp_type_name: icmp_type_name(is_icmp, is_icmpv6, reverse_icmp_type),
-                flow_reverse_icmp_code_id: (is_icmp || is_icmpv6).then_some(reverse_icmp_code),
-                flow_reverse_icmp_code_name: icmp_code_name(
+                flow_icmp_type_id: (is_icmp || is_icmpv6).then_some(stats.icmp_type),
+                flow_icmp_type_name: icmp_type_name(is_icmp, is_icmpv6, stats.icmp_type),
+                flow_icmp_code_id: (is_icmp || is_icmpv6).then_some(stats.icmp_code),
+                flow_icmp_code_name: icmp_code_name(
                     is_icmp,
                     is_icmpv6,
-                    reverse_icmp_type,
-                    reverse_icmp_code,
+                    stats.icmp_type,
+                    stats.icmp_code,
+                ),
+                flow_reverse_icmp_type_id: has_reverse_icmp.then_some(stats.reverse_icmp_type),
+                flow_reverse_icmp_type_name: icmp_type_name(
+                    is_icmp && has_reverse_icmp,
+                    is_icmpv6 && has_reverse_icmp,
+                    stats.reverse_icmp_type,
+                ),
+                flow_reverse_icmp_code_id: has_reverse_icmp.then_some(stats.reverse_icmp_code),
+                flow_reverse_icmp_code_name: icmp_code_name(
+                    is_icmp && has_reverse_icmp,
+                    is_icmpv6 && has_reverse_icmp,
+                    stats.reverse_icmp_type,
+                    stats.reverse_icmp_code,
                 ),
 
                 flow_bytes_delta: 0,
@@ -1232,6 +1245,7 @@ impl FlowWorker {
     /// Calculate timeout duration based on application protocol and flow stats.
     fn calculate_timeout(&self, stats: &FlowStats, transport: IpProto) -> Duration {
         match transport {
+            // shortcut: tunneled TCP only has outer UDP flags, so FIN/RST timeouts never apply. Track inner flags in eBPF if that matters.
             IpProto::Icmp | IpProto::Ipv6Icmp => self.icmp_timeout,
             IpProto::Tcp => {
                 if stats.tcp_flags & TCP_FLAG_FIN != 0 {
@@ -2603,25 +2617,6 @@ mod tests {
         assert_eq!(timeout, worker.icmp_timeout);
 
         std::mem::forget(worker);
-    }
-
-    #[test]
-    fn test_tunneled_span_uses_outer_ebpf_key() {
-        let inner = FlowKey {
-            src_port: (8 << 8) | 0,
-            dst_port: 0,
-            protocol: IpProto::Icmp,
-            ..FlowKey::default()
-        };
-        let outer = FlowKey {
-            src_port: 40000,
-            dst_port: 8472,
-            protocol: IpProto::Udp,
-            ..FlowKey::default()
-        };
-        let ebpf_key = Some(outer).unwrap_or(inner);
-        assert_eq!(ebpf_key.protocol, IpProto::Udp);
-        assert_eq!(ebpf_key.dst_port, 8472);
     }
 
     #[test]

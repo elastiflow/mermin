@@ -149,7 +149,7 @@ mod tests {
         let inner = InnerHeaders {
             src_ip: IpAddr::V4(Ipv4Addr::new(10, 244, 2, 2)),
             dst_ip: IpAddr::V4(Ipv4Addr::new(10, 244, 1, 1)),
-            src_port: (8 << 8) | 0,
+            src_port: 8,
             dst_port: 0,
             protocol: IpProto::Icmp,
             src_mac: [0; 6],
