@@ -141,7 +141,7 @@ RUN cargo build --release
 # Use a distroless base image for the final container without shell support, to get sha run:
 #   skopeo inspect --override-os=linux --override-arch=amd64 --format "Name: {{.Name}} Digest: {{.Digest}}" docker://gcr.io/distroless/cc-debian13:latest
 # hadolint ignore=DL3006 # gcr.io/distroless/cc-debian12 don't have tags
-FROM gcr.io/distroless/cc-debian13@sha256:159783207c2cd44c2aa5715961d13c8612368ac9bd450f887e3f08fc8ea461e3 AS runner
+FROM gcr.io/distroless/cc-debian13@sha256:b2e43dc72acf58a146ed6feaf350806ae3bf4243eb5c68062d06bc13228ca2bd AS runner
 ARG APP_ROOT APP
 
 COPY --from=builder ${APP_ROOT}/target/release/${APP} /usr/bin/${APP}
