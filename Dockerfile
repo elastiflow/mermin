@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.27-labs@sha256:ae9cc40df4eb5b6adcac0a49bdd8e43b6d29d81087fefae2ceb6fe248aab24c8
+# syntax=docker/dockerfile:1.28-labs@sha256:ad43eec41369d9ef94412c0d1eb3203d12218d01da225afc92a3aeba3a0e7796
 # nosemgrep: dockerfile.security.last-user-is-root.last-user-is-root
 # Using "labs" due to "COPY --parents", https://docs.docker.com/reference/dockerfile/#copy---parents
 ARG APP_ROOT=/app
@@ -6,7 +6,7 @@ ARG APP=mermin
 
 
 # ---- Build Stage ----
-FROM debian:13.7-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a AS dependency-hack
+FROM debian:13.7-slim@sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455898a9f034ad AS dependency-hack
 ARG APP_ROOT
 
 WORKDIR ${APP_ROOT}
@@ -22,7 +22,7 @@ RUN cp mermin/Cargo.toml mermin/Cargo.toml.orig \
     | tr '\r' '\n' > Cargo.lock
 
 # ---- Build Stage ----
-FROM rust:1.96.1-trixie@sha256:1f0dbad1df66647807e6952d1db85d0b2bda7606cb2139d82517e4f009967376 AS base
+FROM rust:1.96.1-trixie@sha256:767c71592f7d1f3f242292000f8efd4e67b6732363da176772f4d220332e264f AS base
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # Since Mermin needs root to be ran, switching to non-root in in the base/builder stages does not improve the security.
 # nosemgrep: dockerfile.security.last-user-is-root.last-user-is-root # root is needed due to eBPF
@@ -149,7 +149,7 @@ ENTRYPOINT ["/usr/bin/mermin"]
 
 # ---- Runtime Stage ----
 # Use a distroless base image for the final container with shell support
-FROM debian:13.7-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a AS runner-debug
+FROM debian:13.7-slim@sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455898a9f034ad AS runner-debug
 ARG APP_ROOT APP
 
 COPY --from=builder ${APP_ROOT}/target/release/${APP} /usr/bin/${APP}
