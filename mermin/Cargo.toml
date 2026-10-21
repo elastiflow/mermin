@@ -49,7 +49,7 @@ opentelemetry_sdk = { version = "=0.32.1", features = ["experimental_async_runti
 pnet = "0.34"
 prometheus = "=0.14.0"
 reqwest = { version = "0.13", features = ["rustls"] }
-rustls = "0.23"
+rustls = "0.23.46"
 rustls-native-certs = "0.8"
 rustls-pemfile = "2.2"
 serde = { version = "1.0.219", features = ["derive", "rc"] }
