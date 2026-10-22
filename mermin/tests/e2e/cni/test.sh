@@ -28,9 +28,20 @@ verify_deployment() {
     HELM_NAMESPACE="$NAMESPACE"
 }
 
+# Pin a pod to a node so the pinger and receiver sit on different nodes and the
+# traffic crosses the CNI overlay.
+run_on_node() {
+  local name=$1 node=$2
+  shift 2
+  kubectl -n "${NAMESPACE}" run "$name" --grace-period=1 --image=alpine \
+    --overrides="{\"spec\":{\"nodeName\":\"${node}\"}}" --command -- "$@"
+}
+
 verify_agent_logs() {
-  echo "Creating flows generator (pinger)..."
-  kubectl -n "${NAMESPACE}" run ping-receiver --grace-period=1 --image=alpine --command -- sleep 3600
+  local nodes
+  read -r -a nodes <<<"$(kubectl get nodes -o 'jsonpath={.items[*].metadata.name}')"
+  echo "Creating flows generator (pinger) across nodes: ${nodes[0]} -> ${nodes[1]}..."
+  run_on_node ping-receiver "${nodes[0]}" sleep 3600
   echo "Waiting for ping-receiver pod to be ready..."
   kubectl wait --for=condition=ready pod/ping-receiver -n "${NAMESPACE}" --timeout=60s || {
     echo "ERROR: ping-receiver pod failed to become ready"
@@ -54,7 +65,7 @@ verify_agent_logs() {
     return 1
   fi
 
-  kubectl -n "${NAMESPACE}" run pinger --grace-period=1 --image=alpine --command -- ping "${ping_receiver_ip}"
+  run_on_node pinger "${nodes[1]}" ping "${ping_receiver_ip}"
   echo "Waiting for pinger pod to be ready..."
   kubectl wait --for=condition=ready pod/pinger -n "${NAMESPACE}" --timeout=60s || {
     echo "WARNING: pinger pod failed to become ready. Continuing..."
@@ -65,6 +76,9 @@ verify_agent_logs() {
 
   echo "Verifying mermin agent logs are enriching data..."
   export NAMESPACE RELEASE_NAME
+  # With TUNNEL_TYPE set, the enriched span must also carry the decapsulated tunnel metadata.
+  local pattern='(source\.k8s\.pod\.name.*String\((Owned|Static|RefCounted)\("(pinger|ping-receiver)"\)|destination\.k8s\.pod\.name.*String\((Owned|Static|RefCounted)\("(pinger|ping-receiver)"\))'
+  local tunnel_pattern="tunnel\\.type.*\"${TUNNEL_TYPE:-}\""
   local pods=()
   while IFS= read -r pod_name; do
     if [[ -n "$pod_name" ]]; then
@@ -81,7 +95,9 @@ verify_agent_logs() {
       local counter=0
       while [ $counter -lt 60 ]; do
         # examples: https://regex101.com/r/rYbX7m/1
-        if kubectl logs -n "${NAMESPACE}" "$pod" --tail=10000 2>/dev/null | grep --color=never -E '(source\.k8s\.pod\.name.*String\((Owned|Static|RefCounted)\("(pinger|ping-receiver)"\)|destination\.k8s\.pod\.name.*String\((Owned|Static|RefCounted)\("(pinger|ping-receiver)"\))' >/dev/null; then
+        local logs
+        logs=$(kubectl logs -n "${NAMESPACE}" "$pod" --tail=10000 2>/dev/null || true)
+        if grep -qE "$pattern" <<<"$logs" && { [[ -z "${TUNNEL_TYPE:-}" ]] || grep -qE "$tunnel_pattern" <<<"$logs"; }; then
           exit 0
         fi
         counter=$((counter + 1))
@@ -124,8 +140,14 @@ echo "==============================="
 echo "Testing with CNI: $CNI"
 echo "==============================="
 
+# Flannel uses VXLAN, so watch the uplink and require the decapsulated span to carry tunnel.* attributes.
+if [[ "$CNI" == "flannel" ]]; then
+  MERMIN_CONFIG_PATH=./mermin/tests/e2e/cni/flannel-vxlan.hcl
+  TUNNEL_TYPE=vxlan
+fi
+
 # Export variables needed by setup.sh
-export CLUSTER_NAME RELEASE_NAME NAMESPACE DOCKER_REPOSITORY DOCKER_IMAGE_TAG VALUES_FILE CNI
+export CLUSTER_NAME RELEASE_NAME NAMESPACE DOCKER_REPOSITORY DOCKER_IMAGE_TAG VALUES_FILE CNI MERMIN_CONFIG_PATH
 
 bash ./mermin/tests/e2e/common/setup.sh
 verify_deployment || { dump_debug_info; exit 1; }
