@@ -1,3 +1,16 @@
+## [v0.5.4] - 2026-10-22
+
+### Bug Fixes
+
+- **deps:** Distrust compromised emudhra intermediates (#627)
+- **deps:** Update rust crate rustls to 0.23.46 [security] (#621)
+- **deps:** Update docker (#624)
+- **security:** Fix 8 security issues in mio, zerocopy-derive, jsonptr and 5 more (#623)
+
+[v0.5.3..v0.5.4](https://github.com/elastiflow/mermin/compare/v0.5.3...v0.5.4)
+
+
+
 ## [v0.5.3] - 2026-10-21
 
 ### Bug Fixes
