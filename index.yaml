@@ -736,6 +736,49 @@ entries:
         - name: Chart Source
           url: https://github.com/elastiflow/mermin
     apiVersion: v2
+    appVersion: 0.3.10
+    created: "2026-11-05T19:06:19.75209873Z"
+    dependencies:
+    - condition: mermin.enabled
+      name: mermin
+      repository: https://elastiflow.github.io/mermin/
+      version: '>= 0.5.4'
+    - condition: netobserv-flow.enabled
+      name: netobserv-flow
+      repository: https://elastiflow.github.io/helm-chart-netobserv/
+      version: '>= 0.13.1'
+    - condition: opensearch.enabled
+      name: opensearch
+      repository: https://opensearch-project.github.io/helm-charts/
+      version: '>= 3.9.0'
+    - condition: opensearch-dashboards.enabled
+      name: opensearch-dashboards
+      repository: https://opensearch-project.github.io/helm-charts/
+      version: '>= 3.9.0'
+    description: A Helm chart for deploying the Mermin eBPF agent
+    digest: 2aa1c113a55ce5af7110e8e2b52e33ecbe31bd1c2032c32b57cd3f3f73be9dad
+    icon: https://res.cloudinary.com/elastiflow-cloudinary/image/upload/v1746227898/mermin-horizontal_kxhvzo.png
+    keywords:
+    - netflow
+    - network
+    - flow
+    - observability
+    maintainers:
+    - email: engineering@elastiflow.com
+      name: ElastiFlow Engineering Team
+    name: mermin-netobserv-os-stack
+    sources:
+    - https://github.com/elastiflow/mermin
+    type: application
+    urls:
+    - https://github.com/elastiflow/mermin/releases/download/mermin-netobserv-os-stack-0.3.10/mermin-netobserv-os-stack-0.3.10.tgz
+    version: 0.3.10
+  - annotations:
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: |
+        - name: Chart Source
+          url: https://github.com/elastiflow/mermin
+    apiVersion: v2
     appVersion: 0.3.9
     created: "2026-10-22T15:44:38.457634293Z"
     dependencies:
@@ -1504,4 +1547,4 @@ entries:
     urls:
     - https://github.com/elastiflow/mermin/releases/download/mermin-netobserv-os-stack-0.1.0-beta.12/mermin-netobserv-os-stack-0.1.0-beta.12.tgz
     version: 0.1.0-beta.12
-generated: "2026-10-22T15:44:38.457904509Z"
+generated: "2026-11-05T19:06:19.752264588Z"
