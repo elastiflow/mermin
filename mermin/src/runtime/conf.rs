@@ -806,10 +806,10 @@ pub struct FlowCapture {
     /// Uses `BPF_F_NO_PREALLOC`: memory grows on demand as flows are tracked, up to this
     /// limit. Once full, new flow insert attempts are dropped.
     ///
-    /// Per-entry cost: ~270 bytes (FlowStats: 192 + FlowKey: 40 aligned + htab_elem: ~38).
-    /// Maximum kernel memory when fully populated: capacity × ~270 bytes.
+    /// Per-entry cost: ~318 bytes (FlowStats: 240 + FlowKey: 40 aligned + htab_elem: ~38).
+    /// Maximum kernel memory when fully populated: capacity × ~318 bytes.
     ///
-    /// Default (16,384) targets typical deployments: ~4.4 MB maximum kernel memory.
+    /// Default (16,384) targets typical deployments: ~5.2 MB maximum kernel memory.
     /// This covers ~3,200 flow records/s at the default 5s poll interval.
     ///
     /// Formula: concurrent_flows = flows_per_sec × avg_flow_lifetime_seconds

@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    net::{Ipv4Addr, Ipv6Addr},
     os::fd::AsRawFd,
     sync::Arc,
     time::{Duration, UNIX_EPOCH},
@@ -10,7 +11,7 @@ use aya::maps::{HashMap as EbpfHashMap, RingBuf};
 use dashmap::DashMap;
 use fxhash::FxBuildHasher;
 use mermin_common::{
-    FlowEvent, FlowKey, FlowStats, ListeningPortKey, MapUnit,
+    FlowEvent, FlowKey, FlowStats, IpVersion, ListeningPortKey, MapUnit, TunnelType,
     eth::EtherType,
     ip::{IpDscp, IpEcn, IpProto},
     tcp::{TCP_FLAG_FIN, TCP_FLAG_RST},
@@ -35,10 +36,6 @@ use crate::{
             ChannelName, ChannelSendStatus, FlowEventResult, FlowSpanProducerStatus,
             ProcessingStage,
         },
-    },
-    packet::{
-        parser::{is_tunnel, parse_packet_from_offset},
-        types::ParsedPacket,
     },
     runtime::{conf::Conf, memory::ShrinkPolicy},
     span::{
@@ -147,9 +144,6 @@ pub struct FlowSpanProducer {
     workers: usize,
     flow_store_poll_interval: Duration,
     filter: Option<Arc<PacketFilter>>,
-    vxlan_port: u16,
-    geneve_port: u16,
-    wireguard_port: u16,
     flow_events_ringbuf: RingBuf<aya::maps::MapData>,
     components: Arc<FlowSpanComponents>,
     community_id_generator: CommunityIdGenerator,
@@ -227,9 +221,6 @@ impl FlowSpanProducer {
             workers,
             flow_store_poll_interval: conf.pipeline.flow_producer.flow_store_poll_interval,
             filter,
-            vxlan_port: conf.parser.vxlan_port,
-            geneve_port: conf.parser.geneve_port,
-            wireguard_port: conf.parser.wireguard_port,
             flow_events_ringbuf,
             components,
             community_id_generator,
@@ -271,9 +262,6 @@ impl FlowSpanProducer {
                 Arc::clone(&components.flow_stats_map),
                 worker_rx,
                 self.filter.clone(),
-                self.vxlan_port,
-                self.geneve_port,
-                self.wireguard_port,
                 Arc::clone(&self.direction_inferrer),
             );
 
@@ -620,9 +608,6 @@ pub struct FlowWorker {
     flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
     flow_event_rx: mpsc::Receiver<FlowEvent>,
     filter: Option<Arc<PacketFilter>>,
-    vxlan_port: u16,
-    geneve_port: u16,
-    wireguard_port: u16,
     direction_inferrer: Arc<DirectionInferrer>,
     metrics: FlowWorkerMetrics,
 }
@@ -640,9 +625,6 @@ impl FlowWorker {
         flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
         flow_event_rx: mpsc::Receiver<FlowEvent>,
         filter: Option<Arc<PacketFilter>>,
-        vxlan_port: u16,
-        geneve_port: u16,
-        wireguard_port: u16,
         direction_inferrer: Arc<DirectionInferrer>,
     ) -> Self {
         Self {
@@ -661,9 +643,6 @@ impl FlowWorker {
             flow_stats_map,
             flow_event_rx,
             filter,
-            vxlan_port,
-            geneve_port,
-            wireguard_port,
             direction_inferrer,
             metrics: FlowWorkerMetrics::new(),
         }
@@ -692,35 +671,10 @@ impl FlowWorker {
 
     // TODO: Review starting here
 
-    /// Process a new flow event from eBPF.
-    /// This is the core of the event-driven architecture:
-    /// 1. Check if tunneled (fast path vs slow path)
-    /// 2. For direct traffic: Use FlowStats directly (no parsing!)
-    /// 3. For tunneled traffic: Deep parse packet_data to extract innermost 5-tuple
+    /// Process a new flow event from eBPF. VXLAN/Geneve are decapsulated in eBPF, so every
+    /// event already carries the flow's own 5-tuple and needs no userspace parsing.
     async fn process_new_flow(&self, event: FlowEvent) -> Result<(), Error> {
-        if !is_tunnel(
-            &event.flow_key,
-            self.vxlan_port,
-            self.geneve_port,
-            self.wireguard_port,
-        ) {
-            return self.create_direct_flow(event).await;
-        }
-
-        // TODO: Skip tunneled flow processing for now - untested and needs refactoring
-        debug!(
-            event.name = "tunneled_flow.skipped",
-            worker.id = self.worker_id,
-            protocol = ?event.flow_key.protocol,
-            src_ip = ?event.flow_key.src_ip,
-            dst_ip = ?event.flow_key.dst_ip,
-            "skipping tunneled flow processing - not yet implemented"
-        );
-
-        self.remove_ebpf_map_entry(&self.flow_stats_map, &event.flow_key)
-            .await;
-
-        Ok(())
+        self.create_direct_flow(event).await
     }
 
     async fn remove_ebpf_map_entry(
@@ -838,39 +792,6 @@ impl FlowWorker {
         }
     }
 
-    /// Slow path for tunneled traffic.
-    /// Parses packet_data to extract innermost 5-tuple and tunnel metadata.
-    #[allow(dead_code)]
-    async fn create_tunneled_flow(&self, event: FlowEvent) -> Result<(), Error> {
-        // Parse only the UNPARSED portion (inner headers for tunnels)
-        let unparsed_data = &event.packet_data[..];
-        let parsed = parse_packet_from_offset(unparsed_data, event.parsed_offset)
-            .map_err(|_| Error::UnknownIpAddrType)?;
-
-        // Extract innermost 5-tuple for Community ID
-        match parsed {
-            ParsedPacket::Tunneled { inner, .. } => {
-                // TODO: Generate Community ID from innermost 5-tuple
-                // TODO: Map eBPF FlowKey → Community ID
-                // TODO: Create FlowSpan with tunnel metadata
-
-                warn!(
-                    event.name = "tunneled_flow.not_implemented",
-                    worker.id = self.worker_id,
-                    inner.src_ip = %inner.src_ip,
-                    inner.dst_ip = %inner.dst_ip,
-                    "tunneled flow processing not yet fully implemented"
-                );
-            }
-            ParsedPacket::Direct { .. } => {
-                // This shouldn't happen - we already checked is_likely_tunnel
-                warn!("expected tunneled packet but got plain, treating as error");
-            }
-        }
-
-        Ok(())
-    }
-
     /// Determine if a flow should be processed based on filtering rules.
     fn should_process_flow(&self, flow_key: &FlowKey, stats: &FlowStats) -> bool {
         if let Some(filter) = &self.filter {
@@ -921,7 +842,7 @@ impl FlowWorker {
 
         let flow_direction = FlowDirection::from(span_kind.clone());
 
-        let span = FlowSpan {
+        let mut span = FlowSpan {
             trace_id: Some(self.id_generator.new_trace_id()),
             start_time: UNIX_EPOCH + Duration::from_nanos(start_time_nanos),
             end_time: UNIX_EPOCH + Duration::from_nanos(end_time_nanos),
@@ -1062,6 +983,7 @@ impl FlowWorker {
             timeout_duration: Duration::from_secs(0),
         };
 
+        apply_tunnel_attrs(&mut span, stats);
         self.insert_flow(community_id, span, timeout);
 
         let interface_name = iface_name.as_deref().unwrap_or("unknown");
@@ -1516,6 +1438,34 @@ fn icmp_code_name(
 /// Hash a string for flow partitioning across pollers
 /// Record a flow span by reading from eBPF map, updating counters, and sending to exporter.
 /// Returns true if the flow should continue being tracked, false if export channel is closed.
+/// Copies the outer VXLAN/Geneve headers eBPF recorded into the span's `tunnel.*` attributes.
+/// Runs on every record because a flow first seen on a veth can be decapsulated later.
+fn apply_tunnel_attrs(flow_span: &mut FlowSpan, stats: &FlowStats) {
+    if stats.tunnel_type == TunnelType::None || flow_span.attributes.tunnel_type.is_some() {
+        return;
+    }
+    let addr = |ip: [u8; 16]| -> Option<Arc<str>> {
+        match stats.tunnel_ip_version {
+            IpVersion::V4 => Some(Ipv4Addr::new(ip[0], ip[1], ip[2], ip[3]).to_string().into()),
+            IpVersion::V6 => Some(Ipv6Addr::from(ip).to_string().into()),
+            IpVersion::Unknown => None,
+        }
+    };
+    let attrs = flow_span.attrs_mut();
+    attrs.tunnel_type = Some(stats.tunnel_type);
+    attrs.tunnel_id = Some(stats.tunnel_id);
+    attrs.tunnel_network_type = Some(match stats.tunnel_ip_version {
+        IpVersion::V6 => EtherType::Ipv6,
+        _ => EtherType::Ipv4,
+    });
+    attrs.tunnel_network_transport = Some(IpProto::Udp);
+    attrs.tunnel_network_interface_mac = attrs.network_interface_mac.clone();
+    attrs.tunnel_source_address = addr(stats.tunnel_src_ip);
+    attrs.tunnel_destination_address = addr(stats.tunnel_dst_ip);
+    attrs.tunnel_source_port = Some(stats.tunnel_src_port);
+    attrs.tunnel_destination_port = Some(stats.tunnel_dst_port);
+}
+
 async fn record_flow(
     community_id: &str,
     flow_store: &FlowStore,
@@ -1709,6 +1659,7 @@ async fn record_flow(
     };
 
     let flow_span = &mut entry_ref.flow_span;
+    apply_tunnel_attrs(flow_span, &stats);
     let is_tcp = stats.protocol == IpProto::Tcp;
     let attrs = flow_span.attrs_mut();
     attrs.flow_connection_state = is_tcp.then_some(stats.tcp_state);
@@ -2317,6 +2268,13 @@ mod tests {
             reverse_icmp_code: 0,
             pid: 0,
             comm: [0u8; 16],
+            tunnel_src_ip: [0; 16],
+            tunnel_dst_ip: [0; 16],
+            tunnel_id: 0,
+            tunnel_src_port: 0,
+            tunnel_dst_port: 0,
+            tunnel_type: TunnelType::None,
+            tunnel_ip_version: IpVersion::Unknown,
         }
     }
 
@@ -2366,9 +2324,6 @@ mod tests {
             flow_stats_map,
             flow_event_rx,
             filter: None,
-            vxlan_port: 4789,
-            geneve_port: 6081,
-            wireguard_port: 51820,
             direction_inferrer,
             metrics: FlowWorkerMetrics::new(),
         }

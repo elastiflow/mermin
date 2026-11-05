@@ -18,7 +18,7 @@ Configures eBPF-level flow tracking.
 - `flow_stats_capacity` attribute
 
   Max entries in the `FLOW_STATS` eBPF map. The map is created at this fixed size at program load time and does not resize at runtime. Uses `BPF_F_NO_PREALLOC`:
-  memory grows on demand as flows are tracked, up to this limit — so actual kernel memory equals the number of active concurrent flows × ~270 bytes (FlowStats: 192B + FlowKey: 40B aligned + htab_elem overhead: ~38B).
+  memory grows on demand as flows are tracked, up to this limit — so actual kernel memory equals the number of active concurrent flows × ~318 bytes (FlowStats: 240B + FlowKey: 40B aligned + htab_elem overhead: ~38B).
   Once full, new flows are dropped.
 
   **Type:** Integer
