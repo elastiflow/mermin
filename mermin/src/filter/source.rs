@@ -622,6 +622,13 @@ mod tests {
             reverse_icmp_code: 0,
             pid: 0,
             comm: [0u8; 16],
+            tunnel_src_ip: [0; 16],
+            tunnel_dst_ip: [0; 16],
+            tunnel_id: 0,
+            tunnel_src_port: 0,
+            tunnel_dst_port: 0,
+            tunnel_type: mermin_common::TunnelType::None,
+            tunnel_ip_version: mermin_common::IpVersion::Unknown,
         }
     }
 

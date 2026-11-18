@@ -7,7 +7,6 @@ mod k8s;
 mod listening_ports;
 mod metrics;
 mod otlp;
-mod packet;
 mod runtime;
 mod span;
 
@@ -139,10 +138,11 @@ fn main() {
 /// - Map key/value types
 ///
 /// History:
-/// - v1: Initial schema version (current)
+/// - v1: Initial schema version
+/// - v2: FlowStats gains VXLAN/Geneve tunnel fields (current)
 ///
 /// CI check in place: .github/workflows/ci.yaml (schema_version_check job)
-const EBPF_MAP_SCHEMA_VERSION: u8 = 1;
+const EBPF_MAP_SCHEMA_VERSION: u8 = 2;
 
 /// Timeout for individual export operations (in seconds).
 /// If an export takes longer than this, it's considered timed out and the span may be lost.
@@ -802,7 +802,7 @@ async fn start_pipeline(
     exporter: Arc<dyn TraceableExporter>,
 ) -> Result<Pipeline> {
     let EbpfResources {
-        ebpf,
+        mut ebpf,
         flow_events_ringbuf,
         log_events_ringbuf,
         flow_stats_map,
@@ -810,6 +810,21 @@ async fn start_pipeline(
         iface_map,
         host_netns,
     } = ebpf_resources;
+
+    // Written on every pipeline start so a reloaded `parser` config takes effect.
+    let mut tunnel_ports: aya::maps::Array<_, u16> = aya::maps::Array::try_from(
+        ebpf.map_mut("TUNNEL_PORTS")
+            .ok_or_else(|| MerminError::internal("TUNNEL_PORTS not found in eBPF object"))?,
+    )
+    .map_err(|e| MerminError::internal(format!("failed to convert TUNNEL_PORTS: {e}")))?;
+    for (index, port) in [conf.parser.vxlan_port, conf.parser.geneve_port]
+        .into_iter()
+        .enumerate()
+    {
+        tunnel_ports
+            .set(index as u32, port, 0)
+            .map_err(|e| MerminError::internal(format!("failed to set TUNNEL_PORTS: {e}")))?;
+    }
 
     let mut pipeline_components = ComponentManager::new();
 

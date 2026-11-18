@@ -94,7 +94,7 @@ use aya_ebpf::{
     bindings::TC_ACT_UNSPEC,
     helpers::bpf_ktime_get_boot_ns,
     macros::{classifier, fexit, lsm, map},
-    maps::{HashMap, PerCpuArray, RingBuf},
+    maps::{Array, HashMap, PerCpuArray, RingBuf},
     programs::{LsmContext, TcContext},
 };
 #[cfg(not(feature = "test"))]
@@ -102,11 +102,11 @@ use mermin_common::FlowEvent;
 #[cfg(not(feature = "test"))]
 use mermin_common::LogEntry;
 use mermin_common::{
-    ConnectionState, Direction, EbpfError, FlowKey, FlowStats, IpVersion, eth,
+    ConnectionState, Direction, EbpfError, FlowKey, FlowStats, IpVersion, TunnelType, eth,
     eth::EtherType,
-    icmp,
+    geneve, icmp,
     ip::{IpProto, ipv4, ipv6},
-    tcp, udp,
+    tcp, udp, vxlan,
 };
 
 /// Size of unparsed packet data captured per flow event (in bytes).
@@ -183,6 +183,17 @@ static mut FLOW_EVENT_SCRATCH: PerCpuArray<FlowEvent> = PerCpuArray::with_max_en
 #[cfg(not(feature = "test"))]
 #[map]
 static mut FLOW_KEY_SCRATCH: PerCpuArray<FlowKey> = PerCpuArray::with_max_entries(1, 0);
+
+/// Outer key of a decapsulated packet, kept off the stack until the new-flow path copies it.
+#[cfg(not(feature = "test"))]
+#[map]
+static mut TUNNEL_KEY_SCRATCH: PerCpuArray<FlowKey> = PerCpuArray::with_max_entries(1, 0);
+
+/// UDP ports to decapsulate, written by userspace from the `parser` config.
+/// Index 0 is VXLAN and index 1 is Geneve. A zero port is disabled.
+#[cfg(not(feature = "test"))]
+#[map]
+static mut TUNNEL_PORTS: Array<u16> = Array::with_max_entries(2, 0);
 
 /// Map to track listening ports for client/server direction inference.
 /// Key: ListeningPortKey (port + protocol), Value: 1 (presence marker)
@@ -611,10 +622,41 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, EbpfErro
             .ok_or(EbpfError::ScratchUnavailable)?
     };
     let flow_key = unsafe { &mut *flow_key_ptr };
-    let (eth_type, l4_offset) = parse_flow_key(ctx, flow_key)?;
+    let (mut eth_type, mut l4_offset) = parse_flow_key(ctx, flow_key, 0)?;
+
+    // VXLAN/Geneve: key the flow on the inner frame so stats, TCP state and direction
+    // describe the workload traffic, and keep the outer key as tunnel metadata.
+    let mut frame_offset = 0;
+    let mut tunnel: Option<(TunnelType, u32, *const FlowKey)> = None;
+    if flow_key.protocol == IpProto::Udp {
+        let vxlan_port = unsafe { TUNNEL_PORTS.get(0) }.copied().unwrap_or(0);
+        let geneve_port = unsafe { TUNNEL_PORTS.get(1) }.copied().unwrap_or(0);
+        if let Some((tunnel_type, vni, inner_offset)) =
+            parse_tunnel(ctx, flow_key, l4_offset, vxlan_port, geneve_port)
+        {
+            let outer_key_ptr = unsafe {
+                TUNNEL_KEY_SCRATCH
+                    .get_ptr_mut(0)
+                    .ok_or(EbpfError::ScratchUnavailable)?
+            };
+            unsafe { *outer_key_ptr = *flow_key };
+            match parse_flow_key(ctx, flow_key, inner_offset) {
+                Ok(inner) => {
+                    (eth_type, l4_offset) = inner;
+                    frame_offset = inner_offset;
+                    tunnel = Some((tunnel_type, vni, outer_key_ptr));
+                }
+                // Non-IP inner frames (e.g. ARP) stay accounted on the outer UDP flow.
+                Err(_) => unsafe { *flow_key = *outer_key_ptr },
+            }
+        }
+    }
+    let l3_offset = frame_offset + eth::ETH_LEN;
+    let frame_len = (ctx.len() as u64).saturating_sub(frame_offset as u64);
 
     // Normalize the flow key for map lookup (bidirectional aggregation)
     let normalized_key = flow_key.normalize();
+    let swapped = flow_key.should_normalize();
     let timestamp = unsafe { bpf_ktime_get_boot_ns() };
 
     #[allow(static_mut_refs)]
@@ -650,18 +692,21 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, EbpfErro
         stats.dst_ip = flow_key.dst_ip;
         stats.src_port = flow_key.src_port;
         stats.dst_port = flow_key.dst_port;
+        if let Some((tunnel_type, vni, outer_key_ptr)) = tunnel {
+            record_tunnel(stats, tunnel_type, vni, unsafe { &*outer_key_ptr }, swapped);
+        }
 
         let parsed_offset = parse_metadata(ctx, stats, l4_offset)?;
 
         // Capture metadata for the initial packet's direction
         // During initial creation, stats.src_ip/dst_ip match flow_key (since we just set them),
         // so the packet is in forward direction relative to the normalized key
-        capture_direction_metadata(ctx, stats, eth_type, l4_offset, true)?;
+        capture_direction_metadata(ctx, stats, eth_type, l3_offset, l4_offset, true)?;
         stats.forward_metadata_seen = 1;
         stats.reverse_metadata_seen = 0;
 
         stats.packets += 1;
-        stats.bytes = stats.bytes.saturating_add(ctx.len() as u64);
+        stats.bytes = stats.bytes.saturating_add(frame_len);
 
         if stats.protocol == IpProto::Tcp {
             let current_flags: tcp::Flags = ctx
@@ -694,6 +739,12 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, EbpfErro
     if let Some(s_ptr) = stats_ptr {
         let stats = unsafe { &mut *s_ptr };
         stats.last_seen_ns = timestamp;
+        // The same inner flow can be seen on a veth before its encapsulated copy on the uplink.
+        if let Some((tunnel_type, vni, outer_key_ptr)) = tunnel
+            && stats.tunnel_type == TunnelType::None
+        {
+            record_tunnel(stats, tunnel_type, vni, unsafe { &*outer_key_ptr }, swapped);
+        }
 
         // Determine packet direction relative to the creating packet.
         // stats.src_ip holds the creating packet's source IP. Comparing src alone
@@ -702,10 +753,10 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, EbpfErro
         let is_forward = flow_key.src_ip == stats.src_ip;
         if is_forward {
             stats.packets += 1;
-            stats.bytes = stats.bytes.saturating_add(ctx.len() as u64);
+            stats.bytes = stats.bytes.saturating_add(frame_len);
         } else {
             stats.reverse_packets += 1;
-            stats.reverse_bytes = stats.reverse_bytes.saturating_add(ctx.len() as u64);
+            stats.reverse_bytes = stats.reverse_bytes.saturating_add(frame_len);
         }
 
         // Capture metadata if userspace has reset the flags for re-capture
@@ -717,7 +768,7 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, EbpfErro
         };
 
         if needs_capture {
-            capture_direction_metadata(ctx, stats, eth_type, l4_offset, is_forward)?;
+            capture_direction_metadata(ctx, stats, eth_type, l3_offset, l4_offset, is_forward)?;
             // Set the appropriate metadata flag to 1 after successful capture
             // to prevent repeated capture on subsequent packets in the same direction
             if is_forward {
@@ -802,14 +853,19 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, EbpfErro
 /// - Layer 3: IPv4/IPv6 (addresses, protocol)
 /// - Layer 4: TCP/UDP ports or ICMP type/code
 ///
+/// `frame_offset` is where the Ethernet header starts (0, or the inner frame of a tunnel).
 /// Returns `(eth_type, l4_offset)` where `l4_offset` is the byte offset of the
 /// L4 header within the packet (i.e. past Ethernet + IP headers). Returning this
 /// avoids the duplicate IHL read that `try_flow_stats` would otherwise need.
 ///
 /// This function uses bounded loops to satisfy old kernel verifiers (5.14+).
 #[inline(always)]
-fn parse_flow_key(ctx: &TcContext, key: &mut FlowKey) -> Result<(EtherType, usize), EbpfError> {
-    if eth::ETH_LEN > ctx.len() as usize {
+fn parse_flow_key(
+    ctx: &TcContext,
+    key: &mut FlowKey,
+    frame_offset: usize,
+) -> Result<(EtherType, usize), EbpfError> {
+    if frame_offset + eth::ETH_LEN > ctx.len() as usize {
         return Err(EbpfError::MalformedHeader);
     }
 
@@ -820,14 +876,12 @@ fn parse_flow_key(ctx: &TcContext, key: &mut FlowKey) -> Result<(EtherType, usiz
     key.src_port = 0;
     key.dst_port = 0;
 
-    let mut offset = 0;
-
     let eth_type: EtherType = ctx
-        .load(eth::ETH_ETHER_TYPE_OFFSET)
+        .load(frame_offset + eth::ETH_ETHER_TYPE_OFFSET)
         .map_err(|_| EbpfError::OutOfBounds)?;
-    offset += eth::ETH_LEN;
+    let offset = frame_offset + eth::ETH_LEN;
 
-    offset = match eth_type {
+    let offset = match eth_type {
         EtherType::Ipv4 => {
             if offset + ipv4::IPV4_LEN > ctx.len() as usize {
                 return Err(EbpfError::OutOfBounds);
@@ -931,6 +985,72 @@ fn parse_flow_key(ctx: &TcContext, key: &mut FlowKey) -> Result<(EtherType, usiz
     Ok((eth_type, offset))
 }
 
+/// Stores the outer headers oriented like the normalized key, which is what the span reports
+/// as source/destination. `swapped` is set when normalizing reversed the inner packet.
+#[inline(always)]
+fn record_tunnel(
+    stats: &mut FlowStats,
+    tunnel_type: TunnelType,
+    vni: u32,
+    outer: &FlowKey,
+    swapped: bool,
+) {
+    stats.tunnel_type = tunnel_type;
+    stats.tunnel_id = vni;
+    stats.tunnel_ip_version = outer.ip_version;
+    if swapped {
+        stats.tunnel_src_ip = outer.dst_ip;
+        stats.tunnel_dst_ip = outer.src_ip;
+        stats.tunnel_src_port = outer.dst_port;
+        stats.tunnel_dst_port = outer.src_port;
+    } else {
+        stats.tunnel_src_ip = outer.src_ip;
+        stats.tunnel_dst_ip = outer.dst_ip;
+        stats.tunnel_src_port = outer.src_port;
+        stats.tunnel_dst_port = outer.dst_port;
+    }
+}
+
+/// Detects VXLAN or Geneve on an outer UDP key and returns
+/// `(tunnel_type, vni, inner_frame_offset)`. Anything else, including a Geneve payload
+/// that is not Ethernet, stays keyed on the outer headers.
+#[inline(always)]
+fn parse_tunnel(
+    ctx: &TcContext,
+    outer: &FlowKey,
+    l4_offset: usize,
+    vxlan_port: u16,
+    geneve_port: u16,
+) -> Option<(TunnelType, u32, usize)> {
+    let hdr = l4_offset + udp::UDP_LEN;
+    let is_port = |port: u16| port != 0 && (outer.src_port == port || outer.dst_port == port);
+
+    if is_port(vxlan_port) {
+        let flags: vxlan::Flags = ctx.load(hdr).ok()?;
+        if !vxlan::flags_i_flag(flags) {
+            return None;
+        }
+        let vni: vxlan::Vni = ctx.load(hdr + 4).ok()?;
+        return Some((TunnelType::Vxlan, vxlan::vni(vni), hdr + vxlan::VXLAN_LEN));
+    }
+
+    if is_port(geneve_port) {
+        let ver_opt_len: geneve::VerOptLen = ctx.load(hdr).ok()?;
+        let protocol: u16 = ctx.load(hdr + 2).ok()?;
+        if geneve::ver(ver_opt_len) != 0 || protocol != EtherType::Ethernet as u16 {
+            return None;
+        }
+        let vni: geneve::Vni = ctx.load(hdr + 4).ok()?;
+        return Some((
+            TunnelType::Geneve,
+            geneve::vni(vni),
+            hdr + geneve::total_hdr_len(ver_opt_len),
+        ));
+    }
+
+    None
+}
+
 /// Capture metadata (DSCP, ECN, TTL, flow label, ICMP type/code) for a specific direction.
 /// Used both during initial flow creation and when userspace resets metadata flags for re-capture.
 #[inline(always)]
@@ -938,16 +1058,17 @@ fn capture_direction_metadata(
     ctx: &TcContext,
     stats: &mut FlowStats,
     eth_type: EtherType,
+    l3_offset: usize,
     l4_offset: usize,
     is_forward: bool,
 ) -> Result<(), EbpfError> {
     match eth_type {
         EtherType::Ipv4 => {
             let dscp_ecn: ipv4::DscpEcn = ctx
-                .load(eth::ETH_LEN + ipv4::IPV4_DSCP_ECN_OFFSET)
+                .load(l3_offset + ipv4::IPV4_DSCP_ECN_OFFSET)
                 .map_err(|_| EbpfError::OutOfBounds)?;
             let ttl: ipv4::Ttl = ctx
-                .load(eth::ETH_LEN + ipv4::IPV4_TTL_OFFSET)
+                .load(l3_offset + ipv4::IPV4_TTL_OFFSET)
                 .map_err(|_| EbpfError::OutOfBounds)?;
 
             if is_forward {
@@ -961,9 +1082,9 @@ fn capture_direction_metadata(
             }
         }
         EtherType::Ipv6 => {
-            let vtcfl: ipv6::Vcf = ctx.load(eth::ETH_LEN).map_err(|_| EbpfError::OutOfBounds)?;
+            let vtcfl: ipv6::Vcf = ctx.load(l3_offset).map_err(|_| EbpfError::OutOfBounds)?;
             let hop_limit: ipv6::HopLimit = ctx
-                .load(eth::ETH_LEN + ipv6::IPV6_HOP_LIMIT_OFFSET)
+                .load(l3_offset + ipv6::IPV6_HOP_LIMIT_OFFSET)
                 .map_err(|_| EbpfError::OutOfBounds)?;
 
             if is_forward {
@@ -1466,6 +1587,13 @@ mod tests {
             reverse_icmp_code: 0,
             pid: 0,
             comm: [0; 16],
+            tunnel_src_ip: [0; 16],
+            tunnel_dst_ip: [0; 16],
+            tunnel_id: 0,
+            tunnel_src_port: 0,
+            tunnel_dst_port: 0,
+            tunnel_type: TunnelType::None,
+            tunnel_ip_version: IpVersion::Unknown,
         }
     }
 
@@ -1603,12 +1731,132 @@ mod tests {
         pkt
     }
 
+    // Outer Eth + IPv4 + UDP(54321 -> dst_port) wrapping the plain IPv4 TCP frame.
+    fn build_tunnel_packet(dst_port: u16, tunnel_hdr: &[u8]) -> Vec<u8> {
+        let mut pkt = Vec::new();
+        pkt.extend_from_slice(&[0x02, 0, 0, 0, 0, 0x02, 0x02, 0, 0, 0, 0, 0x01, 0x08, 0x00]);
+        pkt.extend_from_slice(&[
+            0x45, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 64, 17, 0x00, 0x00, 172, 18, 0, 3, 172,
+            18, 0, 4,
+        ]);
+        pkt.extend_from_slice(&54321u16.to_be_bytes());
+        pkt.extend_from_slice(&dst_port.to_be_bytes());
+        pkt.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]);
+        pkt.extend_from_slice(tunnel_hdr);
+        pkt.extend_from_slice(&build_ipv4_tcp_packet());
+        pkt
+    }
+
+    const VXLAN_HDR: [u8; 8] = [0x08, 0, 0, 0, 0x12, 0x34, 0x56, 0];
+
+    fn decap(pkt: Vec<u8>) -> Option<(TunnelType, u32, FlowKey, EtherType, usize, usize)> {
+        let ctx = TcContext::new(pkt);
+        let mut key = FlowKey::default();
+        let (_, l4_offset) = parse_flow_key(&ctx, &mut key, 0).unwrap();
+        let (tunnel_type, vni, inner) = parse_tunnel(&ctx, &key, l4_offset, 4789, 6081)?;
+        let (eth_type, inner_l4) = parse_flow_key(&ctx, &mut key, inner).unwrap();
+        Some((tunnel_type, vni, key, eth_type, inner, inner_l4))
+    }
+
+    #[test]
+    fn test_parse_tunnel_vxlan_keys_inner_flow() {
+        let (tunnel_type, vni, key, eth_type, inner, inner_l4) =
+            decap(build_tunnel_packet(4789, &VXLAN_HDR)).unwrap();
+
+        assert_eq!(tunnel_type, TunnelType::Vxlan);
+        assert_eq!(vni, 0x123456);
+        assert_eq!(inner, 50);
+        assert_eq!(inner_l4, 50 + 34);
+        assert_eq!(eth_type, EtherType::Ipv4);
+        assert_eq!(key.protocol, IpProto::Tcp);
+        assert_eq!(key.src_ip[..4], [192, 168, 1, 10]);
+        assert_eq!(key.dst_ip[..4], [10, 0, 0, 5]);
+        assert_eq!((key.src_port, key.dst_port), (12345, 443));
+    }
+
+    #[test]
+    fn test_parse_tunnel_inner_metadata_uses_inner_headers() {
+        let pkt = build_tunnel_packet(4789, &VXLAN_HDR);
+        let len = pkt.len();
+        let (_, _, key, eth_type, inner, inner_l4) = decap(pkt.clone()).unwrap();
+        let ctx = TcContext::new(pkt);
+        let mut stats = create_test_flow_stats(eth_type, key.protocol);
+        capture_direction_metadata(
+            &ctx,
+            &mut stats,
+            eth_type,
+            inner + eth::ETH_LEN,
+            inner_l4,
+            true,
+        )
+        .unwrap();
+
+        // The inner TCP header carries DSCP 46 and TTL 64; the outer IPv4 header has 0 and 64.
+        assert_eq!(stats.ip_dscp, 46);
+        assert_eq!(len - inner, 60);
+    }
+
+    #[test]
+    fn test_parse_tunnel_geneve_skips_options() {
+        let geneve_hdr = [0x01, 0x00, 0x65, 0x58, 0x00, 0xAB, 0xCD, 0x00, 1, 2, 3, 4];
+        let (tunnel_type, vni, key, _, inner, _) =
+            decap(build_tunnel_packet(6081, &geneve_hdr)).unwrap();
+
+        assert_eq!(tunnel_type, TunnelType::Geneve);
+        assert_eq!(vni, 0xABCD);
+        assert_eq!(inner, 42 + 12);
+        assert_eq!((key.src_port, key.dst_port), (12345, 443));
+    }
+
+    #[test]
+    fn test_parse_tunnel_rejects_non_tunnel_traffic() {
+        // Wrong port, VXLAN without the I flag, and Geneve carrying IPv4 instead of Ethernet.
+        assert!(decap(build_tunnel_packet(5000, &VXLAN_HDR)).is_none());
+        assert!(decap(build_tunnel_packet(4789, &[0, 0, 0, 0, 0, 0, 1, 0])).is_none());
+        assert!(decap(build_tunnel_packet(6081, &[0, 0, 0x08, 0x00, 0, 0, 1, 0])).is_none());
+    }
+
+    #[test]
+    fn test_record_tunnel_follows_normalized_orientation() {
+        let pkt = build_tunnel_packet(4789, &VXLAN_HDR);
+        let ctx = TcContext::new(pkt);
+        let mut outer = FlowKey::default();
+        parse_flow_key(&ctx, &mut outer, 0).unwrap();
+        let mut stats = create_test_flow_stats(EtherType::Ipv4, IpProto::Tcp);
+
+        // Inner 192.168.1.10 -> 10.0.0.5 normalizes to 10.0.0.5 -> 192.168.1.10,
+        // so the outer endpoints swap with it.
+        record_tunnel(&mut stats, TunnelType::Vxlan, 1, &outer, true);
+        assert_eq!(stats.tunnel_src_ip[..4], [172, 18, 0, 4]);
+        assert_eq!(stats.tunnel_dst_ip[..4], [172, 18, 0, 3]);
+        assert_eq!(
+            (stats.tunnel_src_port, stats.tunnel_dst_port),
+            (4789, 54321)
+        );
+
+        record_tunnel(&mut stats, TunnelType::Vxlan, 1, &outer, false);
+        assert_eq!(stats.tunnel_src_ip[..4], [172, 18, 0, 3]);
+        assert_eq!(
+            (stats.tunnel_src_port, stats.tunnel_dst_port),
+            (54321, 4789)
+        );
+    }
+
+    #[test]
+    fn test_parse_tunnel_disabled_port_is_ignored() {
+        let pkt = build_tunnel_packet(4789, &VXLAN_HDR);
+        let ctx = TcContext::new(pkt);
+        let mut key = FlowKey::default();
+        let (_, l4_offset) = parse_flow_key(&ctx, &mut key, 0).unwrap();
+        assert!(parse_tunnel(&ctx, &key, l4_offset, 0, 0).is_none());
+    }
+
     #[test]
     fn test_parse_flow_key_ipv4_tcp() {
         let pkt = build_ipv4_tcp_packet();
         let ctx = TcContext::new(pkt);
         let mut flow_key = FlowKey::default();
-        let result = parse_flow_key(&ctx, &mut flow_key);
+        let result = parse_flow_key(&ctx, &mut flow_key, 0);
         let (ether_type, _l4_offset) = result.unwrap();
         let expected_src = [192, 168, 1, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         let expected_dst = [10, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
@@ -1627,7 +1875,7 @@ mod tests {
         let pkt = build_ipv4_udp_packet();
         let ctx = TcContext::new(pkt);
         let mut flow_key = FlowKey::default();
-        let (ether_type, _l4_offset) = parse_flow_key(&ctx, &mut flow_key).unwrap();
+        let (ether_type, _l4_offset) = parse_flow_key(&ctx, &mut flow_key, 0).unwrap();
 
         assert_eq!(ether_type, EtherType::Ipv4);
         assert_eq!(flow_key.protocol, IpProto::Udp);
@@ -1640,7 +1888,7 @@ mod tests {
         let pkt = build_ipv4_icmp_packet();
         let ctx = TcContext::new(pkt);
         let mut flow_key = FlowKey::default();
-        let (ether_type, _l4_offset) = parse_flow_key(&ctx, &mut flow_key).unwrap();
+        let (ether_type, _l4_offset) = parse_flow_key(&ctx, &mut flow_key, 0).unwrap();
 
         assert_eq!(ether_type, EtherType::Ipv4);
         assert_eq!(flow_key.protocol, IpProto::Icmp);
@@ -1653,7 +1901,7 @@ mod tests {
         let pkt = build_ipv6_tcp_packet();
         let ctx = TcContext::new(pkt);
         let mut flow_key = FlowKey::default();
-        let (ether_type, _l4_offset) = parse_flow_key(&ctx, &mut flow_key).unwrap();
+        let (ether_type, _l4_offset) = parse_flow_key(&ctx, &mut flow_key, 0).unwrap();
 
         assert_eq!(ether_type, EtherType::Ipv6);
         assert_eq!(flow_key.ip_version, IpVersion::V6);
@@ -1667,7 +1915,7 @@ mod tests {
         let pkt = vec![0x00, 0x01, 0x02];
         let ctx = TcContext::new(pkt);
         let mut flow_key = FlowKey::default();
-        let result = parse_flow_key(&ctx, &mut flow_key);
+        let result = parse_flow_key(&ctx, &mut flow_key, 0);
 
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), EbpfError::MalformedHeader);
@@ -1682,7 +1930,7 @@ mod tests {
         pkt.extend_from_slice(&[0x45, 0x00, 0x00, 0x3C, 0x1C, 0x46, 0x40, 0x00, 0x40, 0x06]);
         let ctx = TcContext::new(pkt);
         let mut flow_key = FlowKey::default();
-        let result = parse_flow_key(&ctx, &mut flow_key);
+        let result = parse_flow_key(&ctx, &mut flow_key, 0);
 
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), EbpfError::OutOfBounds);
@@ -1698,7 +1946,7 @@ mod tests {
         pkt.extend_from_slice(&[0x00; 19]);
         let ctx = TcContext::new(pkt);
         let mut flow_key = FlowKey::default();
-        let result = parse_flow_key(&ctx, &mut flow_key);
+        let result = parse_flow_key(&ctx, &mut flow_key, 0);
 
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), EbpfError::MalformedHeader);
@@ -1712,7 +1960,7 @@ mod tests {
         pkt.extend_from_slice(&[0x08, 0x06]); // ARP
         let ctx = TcContext::new(pkt);
         let mut flow_key = FlowKey::default();
-        let result = parse_flow_key(&ctx, &mut flow_key);
+        let result = parse_flow_key(&ctx, &mut flow_key, 0);
 
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), EbpfError::UnsupportedEtherType);
@@ -1723,13 +1971,14 @@ mod tests {
         let pkt = build_ipv4_tcp_packet();
         let ctx = TcContext::new(pkt);
         let mut flow_key = FlowKey::default();
-        let (ether_type, l4_offset) = parse_flow_key(&ctx, &mut flow_key).unwrap();
+        let (ether_type, l4_offset) = parse_flow_key(&ctx, &mut flow_key, 0).unwrap();
         let mut stats = create_test_flow_stats(ether_type, flow_key.protocol);
 
         let result = parse_metadata(&ctx, &mut stats, l4_offset);
         let parsed_offset = result.unwrap();
 
-        capture_direction_metadata(&ctx, &mut stats, ether_type, l4_offset, true).unwrap();
+        capture_direction_metadata(&ctx, &mut stats, ether_type, eth::ETH_LEN, l4_offset, true)
+            .unwrap();
 
         assert!(result.is_ok());
         assert_eq!(stats.src_mac, [0x11, 0x22, 0x33, 0x44, 0x55, 0x66]);
@@ -1745,13 +1994,14 @@ mod tests {
         let pkt = build_ipv6_tcp_packet();
         let ctx = TcContext::new(pkt);
         let mut flow_key = FlowKey::default();
-        let (ether_type, l4_offset) = parse_flow_key(&ctx, &mut flow_key).unwrap();
+        let (ether_type, l4_offset) = parse_flow_key(&ctx, &mut flow_key, 0).unwrap();
         let mut stats = create_test_flow_stats(ether_type, flow_key.protocol);
 
         let result = parse_metadata(&ctx, &mut stats, l4_offset);
         let parsed_offset = result.unwrap();
 
-        capture_direction_metadata(&ctx, &mut stats, ether_type, l4_offset, true).unwrap();
+        capture_direction_metadata(&ctx, &mut stats, ether_type, eth::ETH_LEN, l4_offset, true)
+            .unwrap();
 
         assert!(result.is_ok());
         assert_eq!(stats.src_mac, [0x11, 0x22, 0x33, 0x44, 0x55, 0x66]);
@@ -1767,13 +2017,14 @@ mod tests {
         let pkt = build_ipv4_udp_packet();
         let ctx = TcContext::new(pkt);
         let mut flow_key = FlowKey::default();
-        let (ether_type, l4_offset) = parse_flow_key(&ctx, &mut flow_key).unwrap();
+        let (ether_type, l4_offset) = parse_flow_key(&ctx, &mut flow_key, 0).unwrap();
         let mut stats = create_test_flow_stats(ether_type, flow_key.protocol);
 
         let result = parse_metadata(&ctx, &mut stats, l4_offset);
         let parsed_offset = result.unwrap();
 
-        capture_direction_metadata(&ctx, &mut stats, ether_type, l4_offset, true).unwrap();
+        capture_direction_metadata(&ctx, &mut stats, ether_type, eth::ETH_LEN, l4_offset, true)
+            .unwrap();
 
         assert!(result.is_ok());
         assert_eq!(stats.ip_ttl, 128);
@@ -1785,13 +2036,14 @@ mod tests {
         let pkt = build_ipv4_icmp_packet();
         let ctx = TcContext::new(pkt);
         let mut flow_key = FlowKey::default();
-        let (ether_type, l4_offset) = parse_flow_key(&ctx, &mut flow_key).unwrap();
+        let (ether_type, l4_offset) = parse_flow_key(&ctx, &mut flow_key, 0).unwrap();
         let mut stats = create_test_flow_stats(ether_type, flow_key.protocol);
 
         let result = parse_metadata(&ctx, &mut stats, l4_offset);
         let parsed_offset = result.unwrap();
 
-        capture_direction_metadata(&ctx, &mut stats, ether_type, l4_offset, true).unwrap();
+        capture_direction_metadata(&ctx, &mut stats, ether_type, eth::ETH_LEN, l4_offset, true)
+            .unwrap();
 
         assert!(result.is_ok());
         assert_eq!(stats.icmp_type, 8);
@@ -1823,7 +2075,7 @@ mod tests {
 
         let ctx = TcContext::new(pkt);
         let mut flow_key = FlowKey::default();
-        let (ether_type, l4_offset) = parse_flow_key(&ctx, &mut flow_key).unwrap();
+        let (ether_type, l4_offset) = parse_flow_key(&ctx, &mut flow_key, 0).unwrap();
         let mut stats = create_test_flow_stats(ether_type, flow_key.protocol);
 
         let result = parse_metadata(&ctx, &mut stats, l4_offset);
@@ -1837,7 +2089,8 @@ mod tests {
         let pkt = build_ipv4_tcp_packet();
         let ctx = TcContext::new(pkt);
         let mut stats = create_test_flow_stats(EtherType::Ipv4, IpProto::Tcp);
-        let result = capture_direction_metadata(&ctx, &mut stats, EtherType::Ipv4, 34, true);
+        let result =
+            capture_direction_metadata(&ctx, &mut stats, EtherType::Ipv4, eth::ETH_LEN, 34, true);
 
         assert!(result.is_ok());
         assert_eq!(stats.ip_dscp, 46);
@@ -1855,7 +2108,8 @@ mod tests {
         let pkt = build_ipv4_tcp_packet();
         let ctx = TcContext::new(pkt);
         let mut stats = create_test_flow_stats(EtherType::Ipv4, IpProto::Tcp);
-        let result = capture_direction_metadata(&ctx, &mut stats, EtherType::Ipv4, 34, false);
+        let result =
+            capture_direction_metadata(&ctx, &mut stats, EtherType::Ipv4, eth::ETH_LEN, 34, false);
 
         assert!(result.is_ok());
         assert_eq!(stats.ip_dscp, 0);
@@ -1871,7 +2125,8 @@ mod tests {
         let pkt = build_ipv6_tcp_packet();
         let ctx = TcContext::new(pkt);
         let mut stats = create_test_flow_stats(EtherType::Ipv6, IpProto::Tcp);
-        let result = capture_direction_metadata(&ctx, &mut stats, EtherType::Ipv6, 54, true);
+        let result =
+            capture_direction_metadata(&ctx, &mut stats, EtherType::Ipv6, eth::ETH_LEN, 54, true);
 
         assert!(result.is_ok());
         assert_eq!(stats.ip_dscp, 3);
@@ -1889,7 +2144,8 @@ mod tests {
         let pkt = build_ipv6_tcp_packet();
         let ctx = TcContext::new(pkt);
         let mut stats = create_test_flow_stats(EtherType::Ipv6, IpProto::Tcp);
-        let result = capture_direction_metadata(&ctx, &mut stats, EtherType::Ipv6, 54, false);
+        let result =
+            capture_direction_metadata(&ctx, &mut stats, EtherType::Ipv6, eth::ETH_LEN, 54, false);
 
         assert!(result.is_ok());
         assert_eq!(stats.ip_dscp, 0);
@@ -1907,7 +2163,8 @@ mod tests {
         let pkt = build_ipv4_icmp_packet();
         let ctx = TcContext::new(pkt);
         let mut stats = create_test_flow_stats(EtherType::Ipv4, IpProto::Icmp);
-        let result = capture_direction_metadata(&ctx, &mut stats, EtherType::Ipv4, 34, true);
+        let result =
+            capture_direction_metadata(&ctx, &mut stats, EtherType::Ipv4, eth::ETH_LEN, 34, true);
 
         assert!(result.is_ok());
         assert_eq!(stats.icmp_type, 8); // Echo Request
@@ -1921,7 +2178,8 @@ mod tests {
         let pkt = build_ipv4_icmp_packet();
         let ctx = TcContext::new(pkt);
         let mut stats = create_test_flow_stats(EtherType::Ipv4, IpProto::Icmp);
-        let result = capture_direction_metadata(&ctx, &mut stats, EtherType::Ipv4, 34, false);
+        let result =
+            capture_direction_metadata(&ctx, &mut stats, EtherType::Ipv4, eth::ETH_LEN, 34, false);
 
         assert!(result.is_ok());
         assert_eq!(stats.icmp_type, 0);
@@ -1953,7 +2211,7 @@ mod tests {
 
         let ctx = TcContext::new(pkt);
         let mut flow_key = FlowKey::default();
-        let result = parse_flow_key(&ctx, &mut flow_key);
+        let result = parse_flow_key(&ctx, &mut flow_key, 0);
 
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), EbpfError::UnsupportedProtocol);

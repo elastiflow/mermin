@@ -38,7 +38,7 @@
 //! eBPF/userspace compatibility.
 //!
 //! - [`FlowKey`]: Normalized 5-tuple for bidirectional flow aggregation (Community ID compatible)
-//! - [`FlowStats`]: Per-flow counters and metadata stored in eBPF maps (192 bytes)
+//! - [`FlowStats`]: Per-flow counters and metadata stored in eBPF maps (240 bytes)
 //! - [`FlowEvent`]: New-flow ring buffer event carrying the outermost key plus unparsed packet bytes (234 bytes)
 
 pub mod ah;
@@ -354,6 +354,10 @@ pub struct FlowStats {
     pub src_ip: [u8; 16],
     /// Original destination IP
     pub dst_ip: [u8; 16],
+    /// Outer source IP of the creating packet when the flow was decapsulated (VXLAN/Geneve)
+    pub tunnel_src_ip: [u8; 16],
+    /// Outer destination IP of the creating packet when the flow was decapsulated
+    pub tunnel_dst_ip: [u8; 16],
 
     // === 4-byte aligned (u32) - 20 bytes ===
     /// Network interface index where flow was observed
@@ -366,6 +370,8 @@ pub struct FlowStats {
     pub tcp_txn_count: u32,
     /// Average jitter in nanoseconds (only meaningful when protocol == TCP)
     pub tcp_jitter_avg_ns: u32,
+    /// VXLAN/Geneve VNI (only meaningful when tunnel_type != None)
+    pub tunnel_id: u32,
 
     // === 2-byte aligned (u16) - 6 bytes ===
     /// EtherType
@@ -374,6 +380,10 @@ pub struct FlowStats {
     pub src_port: u16,
     /// Original destination port
     pub dst_port: u16,
+    /// Outer UDP source port of the creating packet (only meaningful when tunnel_type != None)
+    pub tunnel_src_port: u16,
+    /// Outer UDP destination port of the creating packet (only meaningful when tunnel_type != None)
+    pub tunnel_dst_port: u16,
 
     // === 6-byte array (MAC address) - 6 bytes ===
     /// Source MAC address
@@ -418,6 +428,10 @@ pub struct FlowStats {
     pub reverse_icmp_type: u8,
     /// ICMP message code for reverse direction (only meaningful when protocol == ICMP or ICMPv6)
     pub reverse_icmp_code: u8,
+    /// Encapsulation eBPF removed to find the flow key (None for plain traffic)
+    pub tunnel_type: TunnelType,
+    /// Outer IP version (only meaningful when tunnel_type != None)
+    pub tunnel_ip_version: IpVersion,
 
     // === Process metadata - 20 bytes ===
     /// Process ID that created/connected this flow (0 if unknown)
@@ -456,7 +470,7 @@ impl FlowStats {
     /// # Examples
     ///
     /// ```
-    /// # use mermin_common::{FlowStats, ConnectionState, Direction, IpVersion};
+    /// # use mermin_common::{FlowStats, ConnectionState, Direction, IpVersion, TunnelType};
     /// # use mermin_common::eth::EtherType;
     /// # use mermin_common::ip::IpProto;
     /// # let mut stats = FlowStats {
@@ -473,7 +487,9 @@ impl FlowStats {
     /// #     tcp_state: ConnectionState::default(), forward_tcp_flags: 0,
     /// #     reverse_tcp_flags: 0, icmp_type: 0, icmp_code: 0,
     /// #     reverse_icmp_type: 0, reverse_icmp_code: 0,
-    /// #     pid: 0, comm: [0; 16],
+    /// #     pid: 0, comm: [0; 16], tunnel_src_ip: [0; 16], tunnel_dst_ip: [0; 16],
+    /// #     tunnel_id: 0, tunnel_src_port: 0, tunnel_dst_port: 0,
+    /// #     tunnel_type: TunnelType::None, tunnel_ip_version: IpVersion::Unknown,
     /// # };
     /// stats.tcp_flags = FlowStats::TCP_FLAG_SYN | FlowStats::TCP_FLAG_ACK;
     ///
@@ -820,6 +836,13 @@ mod tests {
             reverse_icmp_code: 0,
             pid: 0,
             comm: [0; 16],
+            tunnel_src_ip: [0; 16],
+            tunnel_dst_ip: [0; 16],
+            tunnel_id: 0,
+            tunnel_src_port: 0,
+            tunnel_dst_port: 0,
+            tunnel_type: TunnelType::None,
+            tunnel_ip_version: IpVersion::Unknown,
         }
     }
 
@@ -1141,13 +1164,12 @@ mod tests {
     /// 2. Alignment is consistent
     #[test]
     fn test_flow_stats_memory_layout() {
-        // Verify optimized memory layout (192 bytes)
-        // 88 (11 u64) + 32 (2 IP arrays) + 20 (5 u32) + 6 (3 u16) + 6 (MAC)
-        // + 19 (u8: 11 base + 4 TCP + 4 ICMP) + 1 (pad) + 4 (pid) + 16 (comm) = 192
+        // 88 (11 u64) + 64 (4 IP arrays) + 24 (6 u32) + 10 (5 u16) + 6 (MAC)
+        // + 21 (u8: 11 base + 4 TCP + 4 ICMP + 2 tunnel) + 3 (pad) + 4 (pid) + 16 (comm) + 4 (tail pad) = 240
         assert_eq!(
             size_of::<FlowStats>(),
-            192,
-            "FlowStats size MUST be 192 bytes for eBPF/userspace compatibility"
+            240,
+            "FlowStats size MUST be 240 bytes for eBPF/userspace compatibility"
         );
 
         // Verify alignment (critical for correct memory access in eBPF)
