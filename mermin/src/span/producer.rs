@@ -382,7 +382,9 @@ impl FlowSpanProducer {
     ) {
         let mut flow_events = flow_events;
         let mut shutdown_rx = shutdown_rx;
-        let async_fd = match AsyncFd::new(flow_events.as_raw_fd()) {
+        // SAFETY: `flow_events` owns the ring buffer fd and outlives `async_fd`, which is
+        // dropped before the ring buffer is sent back, so the fd stays open and unchanged.
+        let async_fd = match unsafe { AsyncFd::register(flow_events.as_raw_fd()) } {
             Ok(fd) => fd,
             Err(e) => {
                 error!(
