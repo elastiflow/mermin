@@ -23,7 +23,9 @@ pub async fn run_log_consumer(
     mut shutdown_rx: broadcast::Receiver<()>,
     log_events_return: oneshot::Sender<RingBuf<aya::maps::MapData>>,
 ) {
-    let async_fd = match AsyncFd::new(log_events.as_raw_fd()) {
+    // SAFETY: `log_events` owns the ring buffer fd and outlives `async_fd`, which is
+    // dropped before the ring buffer is sent back, so the fd stays open and unchanged.
+    let async_fd = match unsafe { AsyncFd::register(log_events.as_raw_fd()) } {
         Ok(fd) => fd,
         Err(e) => {
             error!(
