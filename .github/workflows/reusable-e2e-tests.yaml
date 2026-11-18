@@ -108,12 +108,6 @@ jobs:
           IMAGE_TAG: ${{ inputs.image-tag }}
         run: docker load < image-artifact/mermin-${IMAGE_TAG}.tar
 
-      - name: Install Docker Compose
-        run: |
-          sudo curl -L "https://github.com/docker/compose/releases/download/v2.3.3/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-          sudo chmod +x /usr/local/bin/docker-compose
-          docker-compose --version
-
       - name: Make test script executable
         env:
           TEST_PATH: ${{ inputs.test-path }}
