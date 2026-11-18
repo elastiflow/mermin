@@ -1,3 +1,13 @@
+## [v0.5.5] - 2026-11-18
+
+### Bug Fixes
+
+- **security:** Fix 3 security issues in jsonptr, quinn-udp, rand (#635)
+
+[v0.5.4..v0.5.5](https://github.com/elastiflow/mermin/compare/v0.5.4...v0.5.5)
+
+
+
 ## [v0.5.4] - 2026-10-22
 
 ### Bug Fixes
